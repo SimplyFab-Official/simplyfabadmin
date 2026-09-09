@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Fab 2.0 | Complete Admin Studio</title>
+    <title>Simple Fab 2.0 | Full Master Admin Studio</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -56,20 +56,20 @@
                 'SimplyFab-Official/simply-fab-catalog',
                 'SimplyFab-Official/casual-dresses-catalog',
                 'SimplyFab-Official/simply-fab',
-                'SimplyFab-Official/simply-fab-backend',
+                'SimplyFab-Official/simple-fab-backend',
                 'SimplyFab-Official/simplyfabadmin'
             ];
 
             const [products, setProducts] = React.useState([]);
             const [searchQuery, setSearchQuery] = React.useState('');
             const [loading, setLoading] = React.useState(false);
-            const [statusMsg, setStatusMsg] = React.useState('Scanning repository...');
+            const [statusMsg, setStatusMsg] = React.useState('Scanning catalog...');
             
             const [editingItem, setEditingItem] = React.useState(null);
             const [editForm, setEditForm] = React.useState({ id: '', name: '', price: '', imageUrl: '' });
 
             const [showAddModal, setShowAddModal] = React.useState(false);
-            const [addForm, setAddForm] = React.useState({ id: '', name: '', price: '', imageUrl: '' });
+            const [addForm, setAddForm] = React.useState({ id: '', name: '', price: '299.99', imageUrl: '' });
 
             const getSvgPlaceholder = (text) => {
                 return `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"><rect width="100%" height="100%" fill="%23171717"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23d4d4d4" font-family="sans-serif" font-size="16">${encodeURIComponent(text)}</text></svg>`;
@@ -81,12 +81,11 @@
 
             const loadRepoData = async (repo) => {
                 setLoading(true);
-                setStatusMsg('Scanning GitHub for assets and catalog...');
+                setStatusMsg('Fetching catalog from GitHub...');
                 try {
                     let items = [];
-                    let foundSource = '';
+                    let source = '';
 
-                    // 1. Try fetching products.json or catalog.json
                     const paths = ['products.json', 'data/products.json', 'catalog.json'];
                     for (const path of paths) {
                         try {
@@ -95,34 +94,8 @@
                                 const data = await res.json();
                                 if (Array.isArray(data) && data.length > 0) {
                                     items = data;
-                                    foundSource = path;
+                                    source = path;
                                     break;
-                                }
-                            }
-                        } catch (e) {}
-                    }
-
-                    // 2. If no JSON, fallback to scanning all .png image assets
-                    if (items.length === 0) {
-                        try {
-                            const treeRes = await fetch(`https://api.github.com/repos/${repo}/git/trees/main?recursive=1`, {
-                                headers: { Authorization: `token ${token}` }
-                            });
-                            if (treeRes.ok) {
-                                const treeData = await treeRes.json();
-                                const pngs = (treeData.tree || []).filter(f => f.path.toLowerCase().endsWith('.png'));
-                                if (pngs.length > 0) {
-                                    items = pngs.map((file, idx) => {
-                                        const fileName = file.path.split('/').pop().replace(/\.[^/.]+$/, "");
-                                        const cleanName = fileName.replace(/[-_]/g, ' ');
-                                        return {
-                                            id: `Item ${String(idx + 1).padStart(3, '0')}`,
-                                            name: cleanName.charAt(0).toUpperCase() + cleanName.slice(1),
-                                            price: 299.99,
-                                            imageUrl: `https://raw.githubusercontent.com/${repo}/main/${file.path}`
-                                        };
-                                    });
-                                    foundSource = `${pngs.length} PNG assets`;
                                 }
                             }
                         } catch (e) {}
@@ -132,7 +105,7 @@
                         items = [
                             { id: 'Item 001', name: 'Haute Couture Evening Gown 001', price: 299.99, imageUrl: getSvgPlaceholder('Item 001') }
                         ];
-                        foundSource = 'Default Starter Item';
+                        source = 'Default Starter Catalog';
                     }
 
                     const normalized = items.map((item, idx) => {
@@ -150,10 +123,10 @@
                     });
 
                     setProducts(normalized);
-                    setStatusMsg(`Loaded [${foundSource}] (${normalized.length} items)`);
+                    setStatusMsg(`Loaded from [${source}] (${normalized.length} items)`);
                 } catch (e) {
                     setProducts([]);
-                    setStatusMsg('Error loading repo');
+                    setStatusMsg('Error loading repository catalog');
                 } finally {
                     setLoading(false);
                 }
@@ -177,7 +150,7 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        message: 'Update catalog via Admin Studio',
+                        message: 'Update products catalog via Master Admin Studio',
                         content: btoa(unescape(encodeURIComponent(JSON.stringify(updatedList, null, 2)))),
                         sha: sha || undefined
                     })
@@ -192,7 +165,7 @@
                 const success = await commitToGitHub(updated);
                 setEditingItem(null);
                 if (success) alert('Item successfully updated and committed to GitHub!');
-                else alert('Updated locally, but GitHub sync failed. Check token write permissions.');
+                else alert('Updated locally, but GitHub sync failed.');
             };
 
             const handleDeleteItem = async (targetId) => {
@@ -204,7 +177,7 @@
                 else alert('Deleted locally, but GitHub sync failed.');
             };
 
-            const handleAddNewItemSubmit = async (e) => {
+            const handleAddSubmit = async (e) => {
                 e.preventDefault();
                 const newItem = {
                     id: addForm.id.trim(),
@@ -217,7 +190,7 @@
                 setProducts(updated);
                 const success = await commitToGitHub(updated);
                 setShowAddModal(false);
-                setAddForm({ id: '', name: '', price: '', imageUrl: '' });
+                setAddForm({ id: '', name: '', price: '299.99', imageUrl: '' });
                 if (success) alert('New item successfully added and published to GitHub!');
                 else alert('Added locally, but GitHub commit failed.');
             };
@@ -233,7 +206,7 @@
                     <header className="border-b border-neutral-800 bg-neutral-900/90 px-6 py-5 flex items-center justify-between sticky top-0 z-30 shadow-xl backdrop-blur-md">
                         <div className="flex items-center space-x-3">
                             <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-amber-600 to-rose-500 flex items-center justify-center text-white font-serif font-bold text-sm">SF</div>
-                            <h1 className="font-serif text-xl font-bold text-amber-100">Simple Fab 2.0 Admin Studio</h1>
+                            <h1 className="font-serif text-xl font-bold text-amber-100">Simple Fab 2.0 Master Admin</h1>
                         </div>
                         <select
                             value={selectedRepo}
@@ -247,7 +220,7 @@
                     <main className="max-w-7xl mx-auto px-4 py-12 flex-grow w-full space-y-12">
                         <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-neutral-900 p-6 rounded-3xl border border-amber-500/30">
                             <div>
-                                <h2 className="font-serif text-2xl font-bold text-amber-100">Catalog Inventory ({filteredItems.length} items)</h2>
+                                <h2 className="font-serif text-2xl font-bold text-amber-100">Complete Catalog Inventory ({filteredItems.length} items)</h2>
                                 <p className="text-xs text-neutral-400 mt-1">Status: <strong className="text-emerald-400 font-mono">{statusMsg}</strong></p>
                             </div>
                             <div className="flex gap-3 w-full sm:w-auto">
@@ -274,13 +247,16 @@
                         </div>
 
                         {loading ? (
-                            <p className="text-center text-amber-400 py-16 font-mono text-sm">Loading inventory items...</p>
+                            <p className="text-center text-amber-400 py-16 font-mono text-sm">Loading catalog items...</p>
                         ) : filteredItems.length === 0 ? (
                             <div className="border border-dashed border-amber-500/40 rounded-3xl p-16 text-center bg-neutral-900/50 space-y-4">
-                                <p className="text-sm text-neutral-400">No items found.</p>
+                                <p className="text-sm text-neutral-400">No items found in repository.</p>
                                 {isAuthenticated && (
                                     <button 
-                                        onClick={() => setShowAddModal(true)} 
+                                        onClick={() => {
+                                            setAddForm({ id: 'Item 001', name: '', price: '299.99', imageUrl: '' });
+                                            setShowAddModal(true);
+                                        }} 
                                         className="bg-emerald-600 text-white text-xs px-5 py-2.5 rounded-xl font-semibold"
                                     >
                                         + Add First Gown
@@ -388,7 +364,7 @@
                         <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4">
                             <div className="bg-neutral-900 border border-amber-500/40 p-6 rounded-3xl max-w-md w-full space-y-4">
                                 <h3 className="font-serif text-lg font-bold text-amber-100">Add New Gown / Item</h3>
-                                <form onSubmit={handleAddNewItemSubmit} className="space-y-3">
+                                <form onSubmit={handleAddSubmit} className="space-y-3">
                                     <div>
                                         <label className="block text-[10px] text-amber-300 uppercase font-bold">Item ID / Number</label>
                                         <input
