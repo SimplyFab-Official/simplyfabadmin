@@ -171,7 +171,6 @@
                     }
                 });
 
-                // Audit missing slots in sequence
                 let missing = [];
                 if (maxNum > 0) {
                     for (let i = 1; i <= maxNum; i++) {
@@ -185,7 +184,6 @@
                 setLastUploadedId(lastFoundStr);
 
                 if (maxNum >= 0) {
-                    // If there are missing gaps, suggest the first missing slot, otherwise continue max + 1
                     if (missing.length > 0) {
                         setNextItemNo(missing[0]);
                         setForm(f => ({ ...f, id: missing[0] }));
@@ -311,7 +309,6 @@
                 }
             };
 
-            // INLINE EDITING: Update specific property of an existing item in the catalog
             const updateItemField = async (targetId, fieldName, newValue) => {
                 const updated = products.map(p => {
                     const currentId = p.id || p.itemNo;
@@ -331,13 +328,27 @@
                 }
             };
 
+            // ROBUST DELETION FUNCTION: Removes item from state and syncs GitHub products.json instantly
             const deleteItem = async (targetId) => {
-                if (!confirm(`Are you sure you want to delete item ${targetId}?`)) return;
-                const updated = products.filter(p => String(p.id || p.itemNo) !== String(targetId));
-                const success = await commitToGitHub('data/products.json', updated, `Delete item ${targetId}`);
-                if (success) {
-                    setProducts(updated);
-                    detectCustomNamingAndAudit(updated);
+                if (!confirm(`Are you sure you want to permanently delete item "${targetId}" from website data?`)) return;
+                
+                setLoading(true);
+                try {
+                    const updated = products.filter(p => String(p.id || p.itemNo).trim() !== String(targetId).trim());
+                    const success = await commitToGitHub('data/products.json', updated, `Delete website item ${targetId}`);
+                    
+                    if (success) {
+                        setProducts(updated);
+                        detectCustomNamingAndAudit(updated);
+                        alert(`Item "${targetId}" successfully deleted from ${selectedRepo}!`);
+                        scanWebsiteData(selectedRepo);
+                    } else {
+                        alert('Failed to delete item on GitHub. Check your token permissions.');
+                    }
+                } catch (err) {
+                    alert('Error deleting item: ' + err);
+                } finally {
+                    setLoading(false);
                 }
             };
 
@@ -474,7 +485,6 @@
                                             <span className="text-xs font-mono bg-emerald-950 text-emerald-300 px-2.5 py-1 rounded-full border border-emerald-500/40">Target: {nextItemNo}</span>
                                         </div>
 
-                                        {/* MISSING SLOTS AUDIT LOG */}
                                         {missingSlots.length > 0 && (
                                             <div className="bg-amber-950/40 border border-amber-500/50 p-3 rounded-2xl space-y-1">
                                                 <p className="text-[10px] font-semibold text-amber-300 uppercase tracking-wider">⚠️ Catalog Health Notice (Empty Slots Found):</p>
@@ -685,9 +695,10 @@
                                                             <div className="pt-2 border-t border-neutral-800 flex gap-2">
                                                                 <button
                                                                     onClick={() => deleteItem(itemId)}
-                                                                    className="w-full bg-rose-950/50 hover:bg-rose-900 text-rose-300 border border-rose-900/50 text-xs py-2 rounded-xl font-medium transition"
+                                                                    disabled={loading}
+                                                                    className="w-full bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-800 text-xs py-2 rounded-xl font-medium transition cursor-pointer shadow"
                                                                 >
-                                                                    Delete Item
+                                                                    🗑️ Delete from Website
                                                                 </button>
                                                             </div>
                                                         </div>
