@@ -59,19 +59,14 @@
             ];
 
             const [products, setProducts] = React.useState([]);
-            const [orders, setOrders] = React.useState([]);
             const [nextItemNo, setNextItemNo] = React.useState('Item 001');
             const [lastUploadedId, setLastUploadedId] = React.useState('Scanning website...');
             const [missingSlots, setMissingSlots] = React.useState([]);
             
             const [form, setForm] = React.useState({ id: 'Item 001', name: '', price: '' });
             const [primaryImageFile, setPrimaryImageFile] = React.useState(null);
-            const [galleryFiles, setGalleryFiles] = React.useState([]);
-            
             const [loading, setLoading] = React.useState(false);
-            const [activeTab, setActiveTab] = React.useState('store-view');
             const [searchQuery, setSearchQuery] = React.useState('');
-            const [sortBy, setSortBy] = React.useState('newest');
 
             const repoParts = selectedRepo.split('/');
             const orgName = repoParts[0] ? repoParts[0].toLowerCase() : '';
@@ -110,7 +105,6 @@
                         } catch (e) {}
                     }
 
-                    // Fallback to localStorage if GitHub fetch fails or is empty
                     if (!rawData || (Array.isArray(rawData) && rawData.length === 0)) {
                         const localSaved = localStorage.getItem(`cache_products_${repoName}`);
                         if (localSaved) {
@@ -129,7 +123,6 @@
                         }
                     }
 
-                    // Default dummy items if completely empty so the UI is immediately testable and editable
                     if (items.length === 0) {
                         items = [
                             { id: 'Item 001', itemNo: 'Item 001', name: 'Haute Couture Evening Gown 001', price: 299.99, imageUrl: 'https://via.placeholder.com/400?text=Item+001', gallery: [] },
@@ -156,7 +149,6 @@
                     localStorage.setItem(`cache_products_${repoName}`, JSON.stringify(normalized));
                     detectCustomNamingAndAudit(normalized);
                 } catch (err) {
-                    // Fallback state on exception
                     const fallbackItems = [
                         { id: 'Item 001', itemNo: 'Item 001', name: 'Haute Couture Evening Gown 001', price: 299.99, imageUrl: 'https://via.placeholder.com/400', gallery: [] }
                     ];
@@ -308,7 +300,6 @@
 
                     setForm({ id: nextItemNo, name: '', price: '' });
                     setPrimaryImageFile(null);
-                    setGalleryFiles([]);
                     alert(`Item ${cleanId} successfully saved & published!`);
                 } catch (err) {
                     alert('Error: ' + err);
@@ -361,17 +352,7 @@
                 return (item.name && item.name.toLowerCase().includes(q)) || 
                        (item.itemNo && item.itemNo.toLowerCase().includes(q)) || 
                        (item.id && String(item.id).toLowerCase().includes(q));
-            }).sort((a, b) => {
-                if (sortBy === 'newest') return 0;
-                if (sortBy === 'id-asc') return String(a.itemNo || a.id).localeCompare(String(b.itemNo || b.id));
-                if (sortBy === 'id-desc') return String(b.itemNo || b.id).localeCompare(String(a.itemNo || a.id));
-                if (sortBy === 'price-low') return (a.price || 0) - (b.price || 0);
-                if (sortBy === 'price-high') return (b.price || 0) - (a.price || 0);
-                if (sortBy === 'name') return (a.name || '').localeCompare(b.name || '');
-                return 0;
             });
-
-            const recentReferenceItems = [...products].slice(-3).reverse();
 
             if (!isAuthenticated) {
                 return (
@@ -434,23 +415,10 @@
                                         target="_blank" 
                                         rel="noopener noreferrer"
                                         className="text-[11px] text-cyan-400 underline hover:text-cyan-300 font-mono truncate max-w-[200px]"
-                                        title="Open Live Website"
                                     >
                                         🔗 {liveWebsiteUrl}
                                     </a>
                                 </div>
-                            </div>
-                        </div>
-
-                        <div className="bg-neutral-950 px-4 py-2 rounded-2xl border border-amber-500/40 flex items-center gap-3">
-                            <div>
-                                <p className="text-[10px] text-neutral-400 uppercase tracking-wider">Website Last Item</p>
-                                <p className="text-xs font-mono font-bold text-amber-300">{lastUploadedId}</p>
-                            </div>
-                            <div className="h-6 w-[1px] bg-neutral-800"></div>
-                            <div>
-                                <p className="text-[10px] text-neutral-400 uppercase tracking-wider">Next Suggested / Fill Slot</p>
-                                <p className="text-xs font-mono font-bold text-emerald-400">{nextItemNo}</p>
                             </div>
                         </div>
 
@@ -459,7 +427,6 @@
                             <button
                                 onClick={() => { sessionStorage.removeItem('auth_pass'); setIsAuthenticated(false); }}
                                 className="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs px-3 py-2 rounded-xl transition border border-neutral-700"
-                                title="Lock Admin Studio"
                             >
                                 Lock
                             </button>
@@ -467,178 +434,166 @@
                     </header>
 
                     <main className="max-w-7xl mx-auto px-4 py-10 flex-grow w-full z-10 space-y-12">
-                        <div className="space-y-12">
-                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                                <div className="bg-neutral-900/95 p-6 rounded-3xl border border-amber-500/30 shadow-2xl space-y-4">
-                                    <div className="flex justify-between items-center">
-                                        <h2 className="font-serif text-lg font-bold text-amber-100">Add & Publish New Item</h2>
-                                        <span className="text-xs font-mono bg-emerald-950 text-emerald-300 px-2.5 py-1 rounded-full border border-emerald-500/40">Target: {nextItemNo}</span>
-                                    </div>
-
-                                    {missingSlots.length > 0 && (
-                                        <div className="bg-amber-950/40 border border-amber-500/50 p-3 rounded-2xl space-y-1">
-                                            <p className="text-[10px] font-semibold text-amber-300 uppercase tracking-wider">⚠️ Catalog Health Notice (Empty Slots Found):</p>
-                                            <p className="text-[11px] text-neutral-300">Missing item numbers detected: <strong className="text-amber-200 font-mono">{missingSlots.join(', ')}</strong>. The form is pre-filled to fill the first empty slot!</p>
-                                        </div>
-                                    )}
-
-                                    <form onSubmit={handleManualPublish} className="space-y-3">
-                                        <div>
-                                            <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Item ID / Gown Number</label>
-                                            <input
-                                                type="text"
-                                                value={form.id}
-                                                onChange={e => setForm({ ...form, id: e.target.value })}
-                                                className={`w-full bg-neutral-950 border rounded-xl px-3 py-2 text-xs font-bold font-mono tracking-wider ${
-                                                    isIdDuplicate ? 'border-rose-500 text-rose-400 bg-rose-950/20' : 'border-emerald-500/50 text-emerald-300'
-                                                }`}
-                                                required
-                                            />
-                                            {isIdDuplicate && (
-                                                <div className="mt-1.5 p-2 bg-rose-950/60 border border-rose-500/60 rounded-xl flex items-center justify-between text-[11px] text-rose-200">
-                                                    <span>⚠️ <strong>Conflict Warning:</strong> ID already exists!</span>
-                                                    <button 
-                                                        type="button" 
-                                                        onClick={() => setForm({ ...form, id: nextItemNo })}
-                                                        className="underline font-bold text-amber-300 hover:text-white"
-                                                    >
-                                                        Use {nextItemNo}
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div>
-                                            <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Item Name</label>
-                                            <input
-                                                type="text"
-                                                placeholder="e.g. Haute Couture Evening Gown"
-                                                value={form.name}
-                                                onChange={e => setForm({ ...form, name: e.target.value })}
-                                                className="w-full bg-neutral-950 border border-amber-500/30 rounded-xl px-3 py-2 text-xs text-neutral-100"
-                                                required
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Price ($)</label>
-                                            <input
-                                                type="number"
-                                                step="0.01"
-                                                placeholder="0.00"
-                                                value={form.price}
-                                                onChange={e => setForm({ ...form, price: e.target.value })}
-                                                className="w-full bg-neutral-950 border border-amber-500/30 rounded-xl px-3 py-2 text-xs text-neutral-100"
-                                                required
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Main Cover Picture</label>
-                                            <input
-                                                type="file"
-                                                accept="image/*"
-                                                onChange={e => setPrimaryImageFile(e.target.files[0])}
-                                                className="w-full text-xs text-neutral-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-amber-600 file:text-white cursor-pointer"
-                                            />
-                                        </div>
-                                        <button
-                                            type="submit"
-                                            disabled={loading || isIdDuplicate}
-                                            className="w-full bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white font-semibold py-3 rounded-xl text-xs uppercase tracking-wider transition shadow-lg border border-amber-400/40 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            {loading ? 'Publishing...' : isIdDuplicate ? '⚠️ Cannot Publish Duplicate ID' : `Publish Item (${form.id})`}
-                                        </button>
-                                    </form>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                            <div className="bg-neutral-900/95 p-6 rounded-3xl border border-amber-500/30 shadow-2xl space-y-4">
+                                <div className="flex justify-between items-center">
+                                    <h2 className="font-serif text-lg font-bold text-amber-100">Add & Publish New Item</h2>
+                                    <span className="text-xs font-mono bg-emerald-950 text-emerald-300 px-2.5 py-1 rounded-full border border-emerald-500/40">Target: {nextItemNo}</span>
                                 </div>
 
-                                <div className="lg:col-span-2 relative rounded-3xl overflow-hidden border border-amber-500/30 bg-neutral-900/85 backdrop-blur-xl p-8 flex flex-col justify-between shadow-2xl">
-                                    <div className="absolute inset-0 bg-gradient-to-r from-neutral-950/95 via-neutral-900/85 to-neutral-900/60"></div>
-                                    <div className="relative z-10 space-y-4">
-                                        <span className="text-amber-300 text-xs font-semibold tracking-widest uppercase bg-amber-950/60 px-3.5 py-1.5 rounded-full border border-amber-500/40 inline-block">Masterful Craftsmanship & Bespoke Elegance</span>
-                                        <h2 className="font-serif text-3xl font-bold text-amber-50">Look stunning. Feel beautiful. Be simply fabulous.</h2>
-                                        <p className="text-neutral-300 text-sm font-light italic">"Managing repository: <span className="text-amber-400 font-mono">{selectedRepo}</span>"</p>
-                                    </div>
-                                    <div className="relative z-10 mt-6 bg-neutral-950/90 p-4 rounded-2xl border border-amber-500/40 flex flex-col sm:flex-row gap-4 items-center justify-between">
-                                        <div className="w-full">
-                                            <input
-                                                type="text"
-                                                value={searchQuery}
-                                                onChange={e => setSearchQuery(e.target.value)}
-                                                placeholder="Quick search items..."
-                                                className="w-full bg-neutral-900 border border-amber-500/30 rounded-xl px-4 py-2 text-sm text-neutral-100 focus:outline-none focus:border-amber-400"
-                                            />
-                                        </div>
-                                        <div>
-                                            <button onClick={() => scanWebsiteData(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl transition shadow-md whitespace-nowrap">
-                                                🔄 Re-Scan Data
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="space-y-4">
-                                <div className="flex flex-wrap justify-between items-center border-b border-neutral-800 pb-3 gap-4">
-                                    <h3 className="font-serif text-xl font-bold text-amber-100">Catalog Management & Inline Editor ({filteredItems.length} items)</h3>
-                                </div>
-
-                                {filteredItems.length === 0 ? (
-                                    <div className="border border-dashed border-amber-500/40 rounded-3xl p-12 text-center bg-neutral-900/70 space-y-3">
-                                        <h4 className="font-serif text-lg font-medium text-amber-100">No Products Found</h4>
-                                    </div>
-                                ) : (
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                                        {filteredItems.map((item, index) => {
-                                            const itemId = item.id || item.itemNo || `item-${index}`;
-                                            return (
-                                                <div key={itemId} className="bg-neutral-900/95 border border-amber-500/40 rounded-2xl overflow-hidden shadow-2xl flex flex-col justify-between group hover:border-amber-400 transition">
-                                                    <div className="h-48 overflow-hidden bg-neutral-950 relative flex items-center justify-center p-3">
-                                                        <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover rounded-lg" />
-                                                    </div>
-                                                    <div className="p-4 flex flex-col flex-grow justify-between bg-neutral-900 space-y-3">
-                                                        <div className="space-y-2">
-                                                            <div>
-                                                                <label className="block text-[9px] text-amber-300 font-semibold uppercase">Edit Item ID / Number</label>
-                                                                <input
-                                                                    type="text"
-                                                                    defaultValue={item.itemNo || item.id}
-                                                                    onBlur={(e) => updateItemField(itemId, 'id', e.target.value)}
-                                                                    className="w-full bg-neutral-950 border border-amber-500/50 rounded-lg px-2.5 py-1.5 text-xs text-amber-300 font-mono focus:outline-none focus:border-amber-400"
-                                                                />
-                                                            </div>
-                                                            <div>
-                                                                <label className="block text-[9px] text-amber-300 font-semibold uppercase">Edit Item Name</label>
-                                                                <input
-                                                                    type="text"
-                                                                    defaultValue={item.name}
-                                                                    onBlur={(e) => updateItemField(itemId, 'name', e.target.value)}
-                                                                    className="w-full bg-neutral-950 border border-amber-500/50 rounded-lg px-2.5 py-1.5 text-xs text-amber-50 focus:outline-none focus:border-amber-400 font-serif"
-                                                                />
-                                                            </div>
-                                                            <div>
-                                                                <label className="block text-[9px] text-amber-300 font-semibold uppercase">Price ($)</label>
-                                                                <input
-                                                                    type="number"
-                                                                    step="0.01"
-                                                                    defaultValue={item.price}
-                                                                    onBlur={(e) => updateItemField(itemId, 'price', e.target.value)}
-                                                                    className="w-full bg-neutral-950 border border-amber-500/50 rounded-lg px-2.5 py-1.5 text-xs text-emerald-300 font-mono focus:outline-none focus:border-amber-400"
-                                                                />
-                                                            </div>
-                                                        </div>
-                                                        <div className="pt-3 border-t border-neutral-800">
-                                                            <button
-                                                                onClick={() => deleteItem(itemId)}
-                                                                className="w-full bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-700 text-xs py-2.5 rounded-xl font-bold transition cursor-pointer shadow-lg flex items-center justify-center gap-1.5"
-                                                            >
-                                                                🗑️ Delete from Website
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
+                                {missingSlots.length > 0 && (
+                                    <div className="bg-amber-950/40 border border-amber-500/50 p-3 rounded-2xl space-y-1">
+                                        <p className="text-[10px] font-semibold text-amber-300 uppercase tracking-wider">⚠️ Catalog Health Notice (Empty Slots Found):</p>
+                                        <p className="text-[11px] text-neutral-300">Missing item numbers detected: <strong className="text-amber-200 font-mono">{missingSlots.join(', ')}</strong>. Form pre-filled to fill the first empty slot!</p>
                                     </div>
                                 )}
+
+                                <form onSubmit={handleManualPublish} className="space-y-3">
+                                    <div>
+                                        <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Item ID / Gown Number</label>
+                                        <input
+                                            type="text"
+                                            value={form.id}
+                                            onChange={e => setForm({ ...form, id: e.target.value })}
+                                            className={`w-full bg-neutral-950 border rounded-xl px-3 py-2 text-xs font-bold font-mono tracking-wider ${
+                                                isIdDuplicate ? 'border-rose-500 text-rose-400 bg-rose-950/20' : 'border-emerald-500/50 text-emerald-300'
+                                            }`}
+                                            required
+                                        />
+                                        {isIdDuplicate && (
+                                            <p className="text-[10px] text-rose-400 mt-1 font-semibold">⚠️ ID already exists!</p>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Item Name</label>
+                                        <input
+                                            type="text"
+                                            placeholder="e.g. Haute Couture Evening Gown"
+                                            value={form.name}
+                                            onChange={e => setForm({ ...form, name: e.target.value })}
+                                            className="w-full bg-neutral-950 border border-amber-500/30 rounded-xl px-3 py-2 text-xs text-neutral-100"
+                                            required
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Price ($)</label>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            placeholder="0.00"
+                                            value={form.price}
+                                            onChange={e => setForm({ ...form, price: e.target.value })}
+                                            className="w-full bg-neutral-950 border border-amber-500/30 rounded-xl px-3 py-2 text-xs text-neutral-100"
+                                            required
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Cover Picture</label>
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={e => setPrimaryImageFile(e.target.files[0])}
+                                            className="w-full text-xs text-neutral-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-amber-600 file:text-white cursor-pointer"
+                                        />
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        disabled={loading || isIdDuplicate}
+                                        className="w-full bg-gradient-to-r from-amber-600 to-rose-600 text-white font-semibold py-3 rounded-xl text-xs uppercase tracking-wider transition shadow-lg border border-amber-400/40 disabled:opacity-50"
+                                    >
+                                        {loading ? 'Publishing...' : `Publish Item (${form.id})`}
+                                    </button>
+                                </form>
                             </div>
+
+                            <div className="lg:col-span-2 bg-neutral-900/95 p-6 rounded-3xl border border-amber-500/30 shadow-2xl space-y-4 flex flex-col justify-between">
+                                <div>
+                                    <h2 className="font-serif text-xl font-bold text-amber-100">Live Website Preview & Direct Studio Editor</h2>
+                                    <p className="text-xs text-neutral-400 mt-1">Every item shown below mirrors your live website layout, equipped with direct inline edit and delete controls.</p>
+                                </div>
+                                <input
+                                    type="text"
+                                    value={searchQuery}
+                                    onChange={e => setSearchQuery(e.target.value)}
+                                    placeholder="Search catalog items..."
+                                    className="w-full bg-neutral-950 border border-amber-500/30 rounded-xl px-4 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-amber-400"
+                                />
+                                <button onClick={() => scanWebsiteData(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl transition shadow-md w-fit">
+                                    🔄 Refresh & Re-Scan Data
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* LIVE WEBSITE PREVIEW CONTAINER WITH EMBEDDED EDIT & DELETE CONTROLS */}
+                        <div className="space-y-6 pt-6 border-t border-neutral-800">
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <h3 className="font-serif text-2xl font-bold text-amber-100">Live Website Preview Grid ({filteredItems.length} items)</h3>
+                                    <p className="text-xs text-neutral-300 mt-0.5">Edit any Gown ID, Name, or Price directly on these cards to update your live website instantly.</p>
+                                </div>
+                                <a href={liveWebsiteUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-cyan-400 underline font-mono bg-neutral-950 px-3 py-1.5 rounded-xl border border-neutral-800">
+                                    Open Live Page ↗
+                                </a>
+                            </div>
+
+                            {filteredItems.length === 0 ? (
+                                <div className="border border-dashed border-amber-500/40 rounded-3xl p-12 text-center bg-neutral-900/70">
+                                    <p className="text-sm text-neutral-400">No items found in this repository.</p>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 bg-neutral-950 p-6 rounded-3xl border-2 border-amber-500/40 shadow-2xl">
+                                    {filteredItems.map((item, index) => {
+                                        const itemId = item.id || item.itemNo || `item-${index}`;
+                                        return (
+                                            <div key={itemId} className="bg-neutral-900 border-2 border-amber-500/60 rounded-2xl overflow-hidden shadow-2xl flex flex-col justify-between">
+                                                <div className="h-48 overflow-hidden bg-neutral-950 relative flex items-center justify-center p-2">
+                                                    <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover rounded-lg" />
+                                                </div>
+                                                <div className="p-4 space-y-3 bg-neutral-900 flex-grow flex flex-col justify-between">
+                                                    <div className="space-y-2">
+                                                        <div>
+                                                            <label className="block text-[9px] text-amber-300 font-bold uppercase tracking-wider">Edit Gown / Item ID</label>
+                                                            <input
+                                                                type="text"
+                                                                defaultValue={item.itemNo || item.id}
+                                                                onBlur={(e) => updateItemField(itemId, 'id', e.target.value)}
+                                                                className="w-full bg-neutral-950 border border-amber-500/60 rounded-lg px-2.5 py-1.5 text-xs text-amber-300 font-mono font-bold focus:outline-none focus:border-white shadow-inner"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-[9px] text-amber-300 font-bold uppercase tracking-wider">Edit Gown Name</label>
+                                                            <input
+                                                                type="text"
+                                                                defaultValue={item.name}
+                                                                onBlur={(e) => updateItemField(itemId, 'name', e.target.value)}
+                                                                className="w-full bg-neutral-950 border border-amber-500/60 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-white font-serif shadow-inner"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-[9px] text-emerald-400 font-bold uppercase tracking-wider">Edit Price ($)</label>
+                                                            <input
+                                                                type="number"
+                                                                step="0.01"
+                                                                defaultValue={item.price}
+                                                                onBlur={(e) => updateItemField(itemId, 'price', e.target.value)}
+                                                                className="w-full bg-neutral-950 border border-emerald-500/60 rounded-lg px-2.5 py-1.5 text-xs text-emerald-300 font-mono font-bold focus:outline-none focus:border-white shadow-inner"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                    <div className="pt-3 border-t border-neutral-800">
+                                                        <button
+                                                            onClick={() => deleteItem(itemId)}
+                                                            className="w-full bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-600 text-xs py-2.5 rounded-xl font-bold transition cursor-pointer shadow-lg flex items-center justify-center gap-1.5"
+                                                        >
+                                                            🗑️ Delete from Website
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </div>
                     </main>
 
