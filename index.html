@@ -58,10 +58,10 @@
                 'SimplyFab-Official/desktop-tutorial'
             ];
 
+            const [activeTab, setActiveTab] = React.useState('live-view');
             const [products, setProducts] = React.useState([]);
             const [searchQuery, setSearchQuery] = React.useState('');
             const [loading, setLoading] = React.useState(false);
-            const [loadedSourceFile, setLoadedSourceFile] = React.useState('Scanning...');
 
             const repoParts = selectedRepo.split('/');
             const orgName = repoParts[0] ? repoParts[0].toLowerCase() : '';
@@ -74,106 +74,65 @@
 
             React.useEffect(() => {
                 if (isAuthenticated) {
-                    autoDiscoverAndLoadRepo(selectedRepo);
+                    autoFetchRepositoryProducts(selectedRepo);
                 }
             }, [selectedRepo, isAuthenticated]);
 
-            const autoDiscoverAndLoadRepo = async (repo) => {
+            const autoFetchRepositoryProducts = async (repo) => {
                 setLoading(true);
-                setLoadedSourceFile('Scanning repository files...');
                 try {
-                    let rawItems = [];
-                    let foundFileName = '';
+                    let fetchedItems = [];
+                    const paths = ['products.json', 'data/products.json', 'catalog.json'];
 
-                    // 1. Query GitHub repository root contents to discover all files
-                    const rootRes = await fetch(`https://api.github.com/repos/${repo}/contents`, {
-                        headers: { Authorization: `token ${token}` }
-                    });
-
-                    if (rootRes.ok) {
-                        const files = await rootRes.json();
-                        // Look for any .json file that could contain products
-                        const jsonFiles = files.filter(f => f.name.endsWith('.json') && f.name !== 'package.json' && f.name !== 'orders.json');
-                        
-                        for (const jFile of jsonFiles) {
-                            const fileRes = await fetch(jFile.url, {
+                    for (const path of paths) {
+                        try {
+                            const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
                                 headers: { Authorization: `token ${token}` }
                             });
-                            if (fileRes.ok) {
-                                const fileData = await fileRes.json();
+                            if (res.ok) {
+                                const fileData = await res.json();
                                 if (fileData && fileData.content) {
                                     const decoded = JSON.parse(atob(fileData.content.replace(/\n/g, '')));
                                     if (Array.isArray(decoded) && decoded.length > 0) {
-                                        rawItems = decoded;
-                                        foundFileName = jFile.name;
+                                        fetchedItems = decoded;
                                         break;
-                                    } else if (decoded && typeof decoded === 'object') {
-                                        const key = Object.keys(decoded).find(k => Array.isArray(decoded[k]) && decoded[k].length > 0);
-                                        if (key) {
-                                            rawItems = decoded[key];
-                                            foundFileName = `${jFile.name} (${key})`;
-                                            break;
-                                        }
                                     }
                                 }
                             }
-                        }
+                        } catch (e) {}
                     }
 
-                    // 2. If root scan didn't catch it, try explicit paths
-                    if (rawItems.length === 0) {
-                        const explicitPaths = ['products.json', 'data/products.json', 'catalog.json', 'src/products.json'];
-                        for (const path of explicitPaths) {
-                            try {
-                                const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
-                                    headers: { Authorization: `token ${token}` }
-                                });
-                                if (res.ok) {
-                                    const data = await res.json();
-                                    if (data && data.content) {
-                                        const decoded = JSON.parse(atob(data.content.replace(/\n/g, '')));
-                                        if (Array.isArray(decoded)) {
-                                            rawItems = decoded;
-                                            foundFileName = path;
-                                            break;
-                                        }
-                                    }
-                                }
-                            } catch (e) {}
-                        }
-                    }
-
-                    // 3. Fallback to localStorage cache
-                    if (rawItems.length === 0) {
+                    if (fetchedItems.length === 0) {
                         const cached = localStorage.getItem(`cache_products_${repo}`);
-                        if (cached) {
-                            rawItems = JSON.parse(cached);
-                            foundFileName = 'Browser Cache';
-                        }
+                        if (cached) fetchedItems = JSON.parse(cached);
                     }
 
-                    const normalized = rawItems.map((item, idx) => {
-                        const itemId = item.id || item.itemNo || item.code || `Item ${String(idx + 1).padStart(3, '0')}`;
-                        let img = item.imageUrl || item.imageSrc || item.image || item.cover || item.photo || item.picture || item.img || item.thumbnail || item.url || (Array.isArray(item.gallery) ? item.gallery[0] : null);
+                    if (fetchedItems.length === 0) {
+                        fetchedItems = [
+                            { id: 'Item 001', name: 'Haute Couture Evening Gown 001', price: 299.99, imageUrl: getSvgPlaceholder('Item 001') },
+                            { id: 'Item 002', name: 'Haute Couture Evening Gown 002', price: 349.99, imageUrl: getSvgPlaceholder('Item 002') },
+                            { id: 'Item 003', name: 'Haute Couture Evening Gown 003', price: 399.99, imageUrl: getSvgPlaceholder('Item 003') }
+                        ];
+                    }
 
+                    const normalized = fetchedItems.map((item, idx) => {
+                        const itemId = item.id || item.itemNo || `Item ${String(idx + 1).padStart(3, '0')}`;
+                        let img = item.imageUrl || item.image || item.cover || item.photo || item.picture || (Array.isArray(item.gallery) ? item.gallery[0] : null);
                         if (img && !img.startsWith('http') && !img.startsWith('data:')) {
                             img = `https://raw.githubusercontent.com/${repo}/main/${img.startsWith('/') ? img.substring(1) : img}`;
                         }
-
                         return {
                             id: String(itemId),
                             name: item.name || item.title || `Gown ${idx + 1}`,
-                            price: parseFloat(item.price || item.cost || 0),
+                            price: parseFloat(item.price || 0),
                             imageUrl: img || getSvgPlaceholder(itemId)
                         };
                     });
 
                     setProducts(normalized);
-                    setLoadedSourceFile(foundFileName ? `Loaded ${normalized.length} items from [${foundFileName}]` : 'No items found');
                     localStorage.setItem(`cache_products_${repo}`, JSON.stringify(normalized));
                 } catch (e) {
                     setProducts([]);
-                    setLoadedSourceFile('Error scanning repository');
                 } finally {
                     setLoading(false);
                 }
@@ -197,7 +156,7 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        message: 'Update products catalog via Admin Studio',
+                        message: 'Update products via Admin Studio',
                         content: btoa(unescape(encodeURIComponent(JSON.stringify(updatedList, null, 2)))),
                         sha: sha || undefined
                     })
@@ -296,97 +255,114 @@
                                 </select>
                             </div>
                         </div>
+
+                        <div className="flex bg-neutral-900 p-1 rounded-xl border border-neutral-800 text-xs font-semibold">
+                            <button onClick={() => setActiveTab('live-view')} className={`px-4 py-2 rounded-lg transition ${activeTab === 'live-view' ? 'bg-amber-600 text-white' : 'text-neutral-400 hover:text-white'}`}>🌐 Whole Website Live View</button>
+                            <button onClick={() => setActiveTab('editor')} className={`px-4 py-2 rounded-lg transition ${activeTab === 'editor' ? 'bg-amber-600 text-white' : 'text-neutral-400 hover:text-white'}`}>✏️ Edit & Delete Manager ({products.length})</button>
+                        </div>
+
                         <div className="flex items-center gap-3">
-                            <a href={liveWebsiteUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-cyan-400 underline font-mono bg-neutral-950 px-3 py-2 rounded-xl border border-neutral-800">Visit Live Site ↗</a>
-                            <button onClick={addNewItem} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-md">+ Add Gown</button>
                             <button onClick={() => { sessionStorage.removeItem('auth_pass'); setIsAuthenticated(false); }} className="bg-neutral-800 text-neutral-300 text-xs px-3 py-2 rounded-xl">Lock</button>
                         </div>
                     </header>
 
-                    <main className="max-w-7xl mx-auto px-4 py-10 flex-grow w-full space-y-8">
-                        <div className="bg-neutral-950 p-6 rounded-3xl border border-amber-500/30 flex flex-col sm:flex-row gap-4 items-center justify-between">
-                            <div className="w-full">
-                                <input
-                                    type="text"
-                                    value={searchQuery}
-                                    onChange={e => setSearchQuery(e.target.value)}
-                                    placeholder="Search current items..."
-                                    className="w-full bg-neutral-900 border border-amber-500/30 rounded-xl px-4 py-2.5 text-sm text-neutral-100 focus:outline-none"
-                                />
-                                <p className="text-[11px] text-amber-400 font-mono mt-1.5">📂 Status: {loadedSourceFile}</p>
+                    <main className="flex-grow w-full flex flex-col">
+                        {activeTab === 'live-view' && (
+                            <div className="flex flex-col flex-grow w-full p-4 space-y-4">
+                                <div className="flex justify-between items-center bg-neutral-950 px-6 py-3 rounded-2xl border border-amber-500/30">
+                                    <p className="text-xs text-neutral-300">Viewing live repository website: <strong className="text-cyan-400 font-mono">{liveWebsiteUrl}</strong></p>
+                                    <a href={liveWebsiteUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-amber-300 underline font-mono">Open in Full Tab ↗</a>
+                                </div>
+                                <div className="flex-grow w-full h-[750px] rounded-3xl overflow-hidden border-2 border-amber-500/40 bg-neutral-950 shadow-2xl">
+                                    <iframe key={selectedRepo} src={liveWebsiteUrl} title="Live Website Preview" className="w-full h-full border-0 bg-neutral-950" />
+                                </div>
                             </div>
-                            <button onClick={() => autoDiscoverAndLoadRepo(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl whitespace-nowrap">
-                                🔄 Re-Scan Repo Files
-                            </button>
-                        </div>
+                        )}
 
-                        <div className="space-y-6">
-                            <h3 className="font-serif text-2xl font-bold text-amber-100 border-b border-neutral-800 pb-3">All Repository Items ({filteredItems.length})</h3>
-
-                            {loading ? (
-                                <p className="text-center text-amber-400 py-12">Auto-discovering repository files and catalog data...</p>
-                            ) : filteredItems.length === 0 ? (
-                                <div className="border border-dashed border-amber-500/40 rounded-3xl p-12 text-center bg-neutral-950 space-y-3">
-                                    <p className="text-sm text-neutral-400">No catalog items found in this repository.</p>
-                                    <button onClick={addNewItem} className="bg-amber-600 text-white text-xs px-4 py-2 rounded-xl font-semibold">Add First Item</button>
+                        {activeTab === 'editor' && (
+                            <div className="max-w-7xl mx-auto px-4 py-10 w-full space-y-8">
+                                <div className="bg-neutral-950 p-6 rounded-3xl border border-amber-500/30 flex flex-col sm:flex-row gap-4 items-center justify-between">
+                                    <input
+                                        type="text"
+                                        value={searchQuery}
+                                        onChange={e => setSearchQuery(e.target.value)}
+                                        placeholder="Search catalog items..."
+                                        className="w-full bg-neutral-900 border border-amber-500/30 rounded-xl px-4 py-2.5 text-sm text-neutral-100 focus:outline-none"
+                                    />
+                                    <div className="flex gap-3 w-full sm:w-auto">
+                                        <button onClick={addNewItem} className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-md whitespace-nowrap">+ Add New Gown</button>
+                                        <button onClick={() => autoFetchRepositoryProducts(selectedRepo)} className="w-full sm:w-auto bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl whitespace-nowrap">🔄 Refresh</button>
+                                    </div>
                                 </div>
-                            ) : (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                                    {filteredItems.map((item) => (
-                                        <div key={item.id} className="bg-neutral-950 border-2 border-amber-500/60 rounded-2xl overflow-hidden shadow-2xl flex flex-col justify-between">
-                                            <div className="h-48 overflow-hidden bg-neutral-900 relative flex items-center justify-center p-2">
-                                                <img 
-                                                    src={item.imageUrl} 
-                                                    alt={item.name} 
-                                                    className="w-full h-full object-cover rounded-lg" 
-                                                    onError={(e) => { e.target.onerror = null; e.target.src = getSvgPlaceholder(item.id); }}
-                                                />
-                                            </div>
-                                            <div className="p-4 space-y-3 bg-neutral-900 flex-grow flex flex-col justify-between">
-                                                <div className="space-y-2">
-                                                    <div>
-                                                        <label className="block text-[9px] text-amber-300 font-bold uppercase">Gown ID / Number</label>
-                                                        <input
-                                                            type="text"
-                                                            defaultValue={item.id}
-                                                            onBlur={(e) => updateItemField(item.id, 'id', e.target.value)}
-                                                            className="w-full bg-neutral-950 border border-amber-500/60 rounded-lg px-2.5 py-1.5 text-xs text-amber-300 font-mono font-bold focus:outline-none"
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-[9px] text-amber-300 font-bold uppercase">Gown Name</label>
-                                                        <input
-                                                            type="text"
-                                                            defaultValue={item.name}
-                                                            onBlur={(e) => updateItemField(item.id, 'name', e.target.value)}
-                                                            className="w-full bg-neutral-950 border border-amber-500/60 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none font-serif"
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-[9px] text-emerald-400 font-bold uppercase">Price ($)</label>
-                                                        <input
-                                                            type="number"
-                                                            step="0.01"
-                                                            defaultValue={item.price}
-                                                            onBlur={(e) => updateItemField(item.id, 'price', e.target.value)}
-                                                            className="w-full bg-neutral-950 border border-emerald-500/60 rounded-lg px-2.5 py-1.5 text-xs text-emerald-300 font-mono font-bold focus:outline-none"
-                                                        />
-                                                    </div>
-                                                </div>
-                                                <div className="pt-3 border-t border-neutral-800">
-                                                    <button
-                                                        onClick={() => deleteItem(item.id)}
-                                                        className="w-full bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-600 text-xs py-2.5 rounded-xl font-bold transition cursor-pointer shadow-lg flex items-center justify-center gap-1.5"
-                                                    >
-                                                        🗑️ Delete from Website
-                                                    </button>
-                                                </div>
-                                            </div>
+
+                                <div className="space-y-6">
+                                    <h3 className="font-serif text-2xl font-bold text-amber-100 border-b border-neutral-800 pb-3">Edit & Delete Catalog Items ({filteredItems.length})</h3>
+
+                                    {loading ? (
+                                        <p className="text-center text-amber-400 py-12">Loading repository items...</p>
+                                    ) : filteredItems.length === 0 ? (
+                                        <div className="border border-dashed border-amber-500/40 rounded-3xl p-12 text-center bg-neutral-950 space-y-3">
+                                            <p className="text-sm text-neutral-400">No items found.</p>
                                         </div>
-                                    ))}
+                                    ) : (
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                                            {filteredItems.map((item) => (
+                                                <div key={item.id} className="bg-neutral-950 border-2 border-amber-500/60 rounded-2xl overflow-hidden shadow-2xl flex flex-col justify-between">
+                                                    <div className="h-48 overflow-hidden bg-neutral-900 relative flex items-center justify-center p-2">
+                                                        <img 
+                                                            src={item.imageUrl} 
+                                                            alt={item.name} 
+                                                            className="w-full h-full object-cover rounded-lg" 
+                                                            onError={(e) => { e.target.onerror = null; e.target.src = getSvgPlaceholder(item.id); }}
+                                                        />
+                                                    </div>
+                                                    <div className="p-4 space-y-3 bg-neutral-900 flex-grow flex flex-col justify-between">
+                                                        <div className="space-y-2">
+                                                            <div>
+                                                                <label className="block text-[9px] text-amber-300 font-bold uppercase">Gown ID / Number</label>
+                                                                <input
+                                                                    type="text"
+                                                                    defaultValue={item.id}
+                                                                    onBlur={(e) => updateItemField(item.id, 'id', e.target.value)}
+                                                                    className="w-full bg-neutral-950 border border-amber-500/60 rounded-lg px-2.5 py-1.5 text-xs text-amber-300 font-mono font-bold focus:outline-none"
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-[9px] text-amber-300 font-bold uppercase">Gown Name</label>
+                                                                <input
+                                                                    type="text"
+                                                                    defaultValue={item.name}
+                                                                    onBlur={(e) => updateItemField(item.id, 'name', e.target.value)}
+                                                                    className="w-full bg-neutral-950 border border-amber-500/60 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none font-serif"
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-[9px] text-emerald-400 font-bold uppercase">Price ($)</label>
+                                                                <input
+                                                                    type="number"
+                                                                    step="0.01"
+                                                                    defaultValue={item.price}
+                                                                    onBlur={(e) => updateItemField(item.id, 'price', e.target.value)}
+                                                                    className="w-full bg-neutral-950 border border-emerald-500/60 rounded-lg px-2.5 py-1.5 text-xs text-emerald-300 font-mono font-bold focus:outline-none"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                        <div className="pt-3 border-t border-neutral-800">
+                                                            <button
+                                                                onClick={() => deleteItem(item.id)}
+                                                                className="w-full bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-600 text-xs py-2.5 rounded-xl font-bold transition cursor-pointer shadow-lg flex items-center justify-center gap-1.5"
+                                                            >
+                                                                🗑️ Delete from Website
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
-                            )}
-                        </div>
+                            </div>
+                        )}
                     </main>
 
                     <footer className="border-t border-neutral-800 bg-neutral-950 py-6 text-center text-xs text-neutral-400 mt-12">
