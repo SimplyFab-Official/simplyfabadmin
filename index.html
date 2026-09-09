@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Fab 2.0 | Multi-Repo Admin Studio</title>
+    <title>Simple Fab 2.0 | Repo Admin Studio</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -57,13 +57,14 @@
                 'SimplyFab-Official/casual-dresses-catalog',
                 'SimplyFab-Official/simply-fab',
                 'SimplyFab-Official/simple-fab-backend',
-                'SimplyFab-Official/desktop-tutorial'
+                'SimplyFab-Official/simplyfabadmin'
             ];
 
             const [products, setProducts] = React.useState([]);
             const [searchQuery, setSearchQuery] = React.useState('');
             const [loading, setLoading] = React.useState(false);
-            const [loadedSource, setLoadedSource] = React.useState('Scanning...');
+            const [statusMsg, setStatusMsg] = React.useState('Loading...');
+            
             const [editingItem, setEditingItem] = React.useState(null);
             const [editForm, setEditForm] = React.useState({ id: '', name: '', price: '', imageUrl: '' });
 
@@ -72,76 +73,69 @@
             };
 
             React.useEffect(() => {
-                fetchAllRepoItems(selectedRepo);
+                fetchRepoItems(selectedRepo);
             }, [selectedRepo]);
 
-            const fetchAllRepoItems = async (repo) => {
+            const fetchRepoItems = async (repo) => {
                 setLoading(true);
-                setLoadedSource('Scanning repository files...');
+                setStatusMsg('Fetching from GitHub...');
                 try {
                     let items = [];
-                    let sourceName = '';
+                    let source = '';
 
-                    // 1. Try fetching repository contents list directly from GitHub API
-                    const contentsRes = await fetch(`https://api.github.com/repos/${repo}/contents`, {
-                        headers: { Authorization: `token ${token}` }
-                    });
+                    // Direct raw file URLs for maximum reliability
+                    const rawUrls = [
+                        `https://raw.githubusercontent.com/${repo}/main/products.json?t=${Date.now()}`,
+                        `https://raw.githubusercontent.com/${repo}/master/products.json?t=${Date.now()}`,
+                        `https://raw.githubusercontent.com/${repo}/main/data/products.json?t=${Date.now()}`,
+                        `https://raw.githubusercontent.com/${repo}/master/data/products.json?t=${Date.now()}`
+                    ];
 
-                    if (contentsRes.ok) {
-                        const rootFiles = await contentsRes.json();
-                        const jsonFiles = rootFiles.filter(f => f.name.endsWith('.json') && !f.name.includes('package') && !f.name.includes('order'));
-
-                        for (const jFile of jsonFiles) {
-                            const fileRes = await fetch(jFile.download_url + `?t=${Date.now()}`);
-                            if (fileRes.ok) {
-                                const content = await fileRes.json();
-                                if (Array.isArray(content) && content.length > 0) {
-                                    items = content;
-                                    sourceName = jFile.name;
+                    for (const url of rawUrls) {
+                        try {
+                            const res = await fetch(url);
+                            if (res.ok) {
+                                const data = await res.json();
+                                if (Array.isArray(data) && data.length > 0) {
+                                    items = data;
+                                    source = url;
                                     break;
-                                } else if (content && typeof content === 'object') {
-                                    const key = Object.keys(content).find(k => Array.isArray(content[k]) && content[k].length > 0);
+                                } else if (data && typeof data === 'object') {
+                                    const key = Object.keys(data).find(k => Array.isArray(data[k]) && data[k].length > 0);
                                     if (key) {
-                                        items = content[key];
-                                        sourceName = `${jFile.name} (${key})`;
+                                        items = data[key];
+                                        source = `${url} (${key})`;
                                         break;
                                     }
                                 }
                             }
-                        }
+                        } catch (e) {}
                     }
 
-                    // 2. If root scan didn't find items, check standard branch trees (main and master)
+                    // Fallback to GitHub Contents API if raw fails
                     if (items.length === 0) {
-                        for (const branch of ['main', 'master']) {
-                            try {
-                                const treeRes = await fetch(`https://api.github.com/repos/${repo}/git/trees/${branch}?recursive=1`, {
-                                    headers: { Authorization: `token ${token}` }
-                                });
-                                if (treeRes.ok) {
-                                    const treeData = await treeRes.json();
-                                    const targetFile = treeData.tree.find(f => f.path.endsWith('products.json') || f.path.endsWith('catalog.json'));
-                                    if (targetFile) {
-                                        const rawRes = await fetch(`https://raw.githubusercontent.com/${repo}/${branch}/${targetFile.path}?t=${Date.now()}`);
-                                        if (rawRes.ok) {
-                                            const jsonContent = await rawRes.json();
-                                            if (Array.isArray(jsonContent) && jsonContent.length > 0) {
-                                                items = jsonContent;
-                                                sourceName = `${branch}/${targetFile.path}`;
-                                                break;
-                                            }
-                                        }
+                        try {
+                            const apiRes = await fetch(`https://api.github.com/repos/${repo}/contents/products.json`, {
+                                headers: { Authorization: `token ${token}` }
+                            });
+                            if (apiRes.ok) {
+                                const fileData = await apiRes.json();
+                                if (fileData && fileData.content) {
+                                    const decoded = JSON.parse(atob(fileData.content.replace(/\n/g, '')));
+                                    if (Array.isArray(decoded)) {
+                                        items = decoded;
+                                        source = 'GitHub API (products.json)';
                                     }
                                 }
-                            } catch (e) {}
-                        }
+                            }
+                        } catch (e) {}
                     }
 
                     if (items.length === 0) {
                         const cached = localStorage.getItem(`cache_products_${repo}`);
                         if (cached) {
                             items = JSON.parse(cached);
-                            sourceName = 'Browser Cache';
+                            source = 'Local Storage Cache';
                         }
                     }
 
@@ -149,7 +143,7 @@
                         items = [
                             { id: 'Item 001', name: 'Haute Couture Evening Gown 001', price: 299.99, imageUrl: getSvgPlaceholder('Item 001') }
                         ];
-                        sourceName = 'Default Fallback';
+                        source = 'Default Template';
                     }
 
                     const normalized = items.map((item, idx) => {
@@ -169,11 +163,11 @@
                     });
 
                     setProducts(normalized);
-                    setLoadedSource(`Loaded from [${sourceName}] (${normalized.length} items)`);
+                    setStatusMsg(`Loaded from [${source}] (${normalized.length} items)`);
                     localStorage.setItem(`cache_products_${repo}`, JSON.stringify(normalized));
                 } catch (e) {
                     setProducts([]);
-                    setLoadedSource('Error fetching repo items');
+                    setStatusMsg('Error loading repository data');
                 } finally {
                     setLoading(false);
                 }
@@ -212,8 +206,8 @@
                 localStorage.setItem(`cache_products_${selectedRepo}`, JSON.stringify(updated));
                 const success = await commitToGitHub(updated);
                 setEditingItem(null);
-                if (success) alert(`Item updated and synced to GitHub successfully!`);
-                else alert(`Saved locally, but GitHub sync failed. Check token permissions.`);
+                if (success) alert(`Item updated & synced to GitHub successfully!`);
+                else alert(`Saved locally, but GitHub commit failed. Check token permissions.`);
             };
 
             const handleDeleteItem = async (targetId) => {
@@ -221,8 +215,9 @@
                 const updated = products.filter(p => p.id !== targetId);
                 setProducts(updated);
                 localStorage.setItem(`cache_products_${selectedRepo}`, JSON.stringify(updated));
-                await commitToGitHub(updated);
-                alert(`Item "${targetId}" deleted successfully!`);
+                const success = await commitToGitHub(updated);
+                if (success) alert(`Item deleted & synced to GitHub successfully!`);
+                else alert(`Deleted locally, but GitHub sync failed.`);
             };
 
             const addNewItem = async () => {
@@ -242,8 +237,8 @@
                 setProducts(updated);
                 localStorage.setItem(`cache_products_${selectedRepo}`, JSON.stringify(updated));
                 const success = await commitToGitHub(updated);
-                if (success) alert(`Gown ${id} added and synced to GitHub successfully!`);
-                else alert(`Added locally, but GitHub sync failed. Please check your token write permissions.`);
+                if (success) alert(`New gown added & synced to GitHub successfully!`);
+                else alert(`Added locally, but GitHub sync failed.`);
             };
 
             const filteredItems = products.filter(item => {
@@ -254,33 +249,25 @@
 
             return (
                 <div className="flex flex-col min-h-screen bg-neutral-950 text-neutral-100">
-                    <div className="bg-gradient-to-r from-amber-600 via-rose-600 to-amber-600 text-white text-xs py-2 px-4 text-center font-medium tracking-widest uppercase overflow-hidden whitespace-nowrap shadow-sm">
-                        <div className="animate-marquee">
-                            EXQUISITE HANDCRAFTED HAUTE COUTURE &bull; MULTI-REPO CATALOGUE &bull; SIMPLE FAB 2.0
-                        </div>
-                    </div>
-
                     <header className="border-b border-neutral-800 bg-neutral-900/90 px-6 py-5 flex items-center justify-between sticky top-0 z-30 shadow-xl backdrop-blur-md">
                         <div className="flex items-center space-x-3">
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-amber-600 via-rose-500 to-amber-400 flex items-center justify-center text-white font-serif font-bold text-sm shadow-md border border-amber-300/40">SF</div>
-                            <h1 className="font-serif text-xl font-bold tracking-wide text-amber-100">Simple Fab 2.0</h1>
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-amber-600 to-rose-500 flex items-center justify-center text-white font-serif font-bold text-sm">SF</div>
+                            <h1 className="font-serif text-xl font-bold text-amber-100">Simple Fab 2.0 Admin Studio</h1>
                         </div>
-                        <div className="flex items-center gap-4">
-                            <select
-                                value={selectedRepo}
-                                onChange={(e) => setSelectedRepo(e.target.value)}
-                                className="bg-neutral-950 border border-amber-500/40 text-xs px-3 py-2 rounded-xl text-amber-300 font-mono focus:outline-none"
-                            >
-                                {repositories.map(r => <option key={r} value={r}>{r}</option>)}
-                            </select>
-                        </div>
+                        <select
+                            value={selectedRepo}
+                            onChange={(e) => setSelectedRepo(e.target.value)}
+                            className="bg-neutral-950 border border-amber-500/40 text-xs px-3 py-2 rounded-xl text-amber-300 font-mono focus:outline-none"
+                        >
+                            {repositories.map(r => <option key={r} value={r}>{r}</option>)}
+                        </select>
                     </header>
 
                     <main className="max-w-7xl mx-auto px-4 py-12 flex-grow w-full space-y-12">
                         <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-neutral-900 p-6 rounded-3xl border border-amber-500/30">
                             <div>
-                                <h2 className="font-serif text-2xl font-bold text-amber-100">Live Website Catalog ({filteredItems.length} items)</h2>
-                                <p className="text-xs text-neutral-400 mt-1">Status: <strong className="text-emerald-400 font-mono">{loadedSource}</strong></p>
+                                <h2 className="font-serif text-2xl font-bold text-amber-100">Repository Catalog ({filteredItems.length} items)</h2>
+                                <p className="text-xs text-neutral-400 mt-1">Status: <strong className="text-emerald-400 font-mono">{statusMsg}</strong></p>
                             </div>
                             <div className="flex gap-3 w-full sm:w-auto">
                                 <input
@@ -293,12 +280,12 @@
                                 {isAuthenticated && (
                                     <button onClick={addNewItem} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-4 py-2 rounded-xl font-semibold whitespace-nowrap">+ Add New Gown</button>
                                 )}
-                                <button onClick={() => discoverAndFetchRepo(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2 rounded-xl font-semibold whitespace-nowrap">🔄 Refresh</button>
+                                <button onClick={() => fetchRepoItems(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2 rounded-xl font-semibold whitespace-nowrap">🔄 Refresh</button>
                             </div>
                         </div>
 
                         {loading ? (
-                            <p className="text-center text-amber-400 py-16 font-mono text-sm">Scanning all branches and files from GitHub...</p>
+                            <p className="text-center text-amber-400 py-16 font-mono text-sm">Loading repository catalog...</p>
                         ) : filteredItems.length === 0 ? (
                             <div className="border border-dashed border-amber-500/40 rounded-3xl p-16 text-center bg-neutral-900/50 space-y-4">
                                 <p className="text-sm text-neutral-400">No items found in this repository.</p>
@@ -347,7 +334,6 @@
                         )}
                     </main>
 
-                    {/* DISCREET FLOATING ADMIN ACCESS TRIGGER */}
                     <div className="fixed bottom-6 right-6 z-40">
                         <button
                             onClick={() => setIsAdminOpen(true)}
@@ -357,9 +343,8 @@
                         </button>
                     </div>
 
-                    {/* ADMIN STUDIO MODAL */}
                     {isAdminOpen && (
-                        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4 overflow-y-auto">
+                        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4">
                             <div className="bg-neutral-900 border-2 border-amber-500/50 rounded-3xl max-w-md w-full p-6 space-y-6 shadow-2xl relative">
                                 <div className="flex justify-between items-center border-b border-neutral-800 pb-4">
                                     <h3 className="font-serif text-xl font-bold text-amber-100">Admin Authorization</h3>
@@ -368,7 +353,7 @@
 
                                 {!isAuthenticated ? (
                                     <form onSubmit={handleLogin} className="space-y-4">
-                                        <p className="text-xs text-neutral-400">Enter PIN <strong className="text-amber-300">021910</strong> to unlock add, edit, and delete permissions.</p>
+                                        <p className="text-xs text-neutral-400">Enter PIN <strong className="text-amber-300">021910</strong> to unlock add, edit, price updates, and delete permissions.</p>
                                         <input
                                             type="password"
                                             maxLength="6"
@@ -380,7 +365,7 @@
                                             required
                                         />
                                         {passError && <p className="text-xs text-rose-400 font-medium">Incorrect PIN code.</p>}
-                                        <button type="submit" className="w-full bg-gradient-to-r from-amber-600 to-rose-600 text-white font-semibold py-3.5 rounded-xl text-xs uppercase tracking-wider">Unlock Additions</button>
+                                        <button type="submit" className="w-full bg-gradient-to-r from-amber-600 to-rose-600 text-white font-semibold py-3.5 rounded-xl text-xs uppercase tracking-wider">Unlock Controls</button>
                                     </form>
                                 ) : (
                                     <div className="space-y-4 text-center">
@@ -393,7 +378,6 @@
                         </div>
                     )}
 
-                    {/* EDIT & PRICE UPDATE MODAL */}
                     {editingItem && (
                         <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4">
                             <div className="bg-neutral-900 border border-amber-500/40 p-6 rounded-3xl max-w-md w-full space-y-4">
@@ -448,11 +432,6 @@
                             </div>
                         </div>
                     )}
-
-                    <footer className="border-t border-neutral-800 bg-neutral-900 py-8 text-center text-xs text-neutral-400 mt-12 space-y-1">
-                        <p className="font-serif text-amber-200 text-sm">Simple Fab 2.0 Haute Couture</p>
-                        <p>&copy; 2026 All rights reserved. &bull; Developed by Jeff O.</p>
-                    </footer>
                 </div>
             );
         }
