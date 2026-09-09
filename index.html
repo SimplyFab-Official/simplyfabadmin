@@ -61,6 +61,7 @@
             const [products, setProducts] = React.useState([]);
             const [searchQuery, setSearchQuery] = React.useState('');
             const [loading, setLoading] = React.useState(false);
+            const [loadedSourceFile, setLoadedSourceFile] = React.useState('Scanning...');
 
             const repoParts = selectedRepo.split('/');
             const orgName = repoParts[0] ? repoParts[0].toLowerCase() : '';
@@ -73,56 +74,88 @@
 
             React.useEffect(() => {
                 if (isAuthenticated) {
-                    loadRepositoryData(selectedRepo);
+                    autoDiscoverAndLoadRepo(selectedRepo);
                 }
             }, [selectedRepo, isAuthenticated]);
 
-            const loadRepositoryData = async (repo) => {
+            const autoDiscoverAndLoadRepo = async (repo) => {
                 setLoading(true);
+                setLoadedSourceFile('Scanning repository files...');
                 try {
-                    let items = [];
-                    const candidatePaths = [
-                        'products.json',
-                        'data/products.json',
-                        'catalog.json',
-                        'data/catalog.json',
-                        'src/products.json'
-                    ];
+                    let rawItems = [];
+                    let foundFileName = '';
 
-                    for (const path of candidatePaths) {
-                        try {
-                            const apiUrl = `https://api.github.com/repos/${repo}/contents/${path}`;
-                            const res = await fetch(apiUrl, {
+                    // 1. Query GitHub repository root contents to discover all files
+                    const rootRes = await fetch(`https://api.github.com/repos/${repo}/contents`, {
+                        headers: { Authorization: `token ${token}` }
+                    });
+
+                    if (rootRes.ok) {
+                        const files = await rootRes.json();
+                        // Look for any .json file that could contain products
+                        const jsonFiles = files.filter(f => f.name.endsWith('.json') && f.name !== 'package.json' && f.name !== 'orders.json');
+                        
+                        for (const jFile of jsonFiles) {
+                            const fileRes = await fetch(jFile.url, {
                                 headers: { Authorization: `token ${token}` }
                             });
-                            if (res.ok) {
-                                const fileData = await res.json();
+                            if (fileRes.ok) {
+                                const fileData = await fileRes.json();
                                 if (fileData && fileData.content) {
                                     const decoded = JSON.parse(atob(fileData.content.replace(/\n/g, '')));
-                                    if (Array.isArray(decoded)) {
-                                        items = decoded;
+                                    if (Array.isArray(decoded) && decoded.length > 0) {
+                                        rawItems = decoded;
+                                        foundFileName = jFile.name;
                                         break;
                                     } else if (decoded && typeof decoded === 'object') {
-                                        const foundKey = Object.keys(decoded).find(k => Array.isArray(decoded[k]));
-                                        if (foundKey) {
-                                            items = decoded[foundKey];
+                                        const key = Object.keys(decoded).find(k => Array.isArray(decoded[k]) && decoded[k].length > 0);
+                                        if (key) {
+                                            rawItems = decoded[key];
+                                            foundFileName = `${jFile.name} (${key})`;
                                             break;
                                         }
                                     }
                                 }
                             }
-                        } catch (e) {}
+                        }
                     }
 
-                    if (items.length === 0) {
+                    // 2. If root scan didn't catch it, try explicit paths
+                    if (rawItems.length === 0) {
+                        const explicitPaths = ['products.json', 'data/products.json', 'catalog.json', 'src/products.json'];
+                        for (const path of explicitPaths) {
+                            try {
+                                const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+                                    headers: { Authorization: `token ${token}` }
+                                });
+                                if (res.ok) {
+                                    const data = await res.json();
+                                    if (data && data.content) {
+                                        const decoded = JSON.parse(atob(data.content.replace(/\n/g, '')));
+                                        if (Array.isArray(decoded)) {
+                                            rawItems = decoded;
+                                            foundFileName = path;
+                                            break;
+                                        }
+                                    }
+                                }
+                            } catch (e) {}
+                        }
+                    }
+
+                    // 3. Fallback to localStorage cache
+                    if (rawItems.length === 0) {
                         const cached = localStorage.getItem(`cache_products_${repo}`);
-                        if (cached) items = JSON.parse(cached);
+                        if (cached) {
+                            rawItems = JSON.parse(cached);
+                            foundFileName = 'Browser Cache';
+                        }
                     }
 
-                    const normalized = items.map((item, idx) => {
+                    const normalized = rawItems.map((item, idx) => {
                         const itemId = item.id || item.itemNo || item.code || `Item ${String(idx + 1).padStart(3, '0')}`;
                         let img = item.imageUrl || item.imageSrc || item.image || item.cover || item.photo || item.picture || item.img || item.thumbnail || item.url || (Array.isArray(item.gallery) ? item.gallery[0] : null);
-                        
+
                         if (img && !img.startsWith('http') && !img.startsWith('data:')) {
                             img = `https://raw.githubusercontent.com/${repo}/main/${img.startsWith('/') ? img.substring(1) : img}`;
                         }
@@ -136,9 +169,11 @@
                     });
 
                     setProducts(normalized);
+                    setLoadedSourceFile(foundFileName ? `Loaded ${normalized.length} items from [${foundFileName}]` : 'No items found');
                     localStorage.setItem(`cache_products_${repo}`, JSON.stringify(normalized));
                 } catch (e) {
                     setProducts([]);
+                    setLoadedSourceFile('Error scanning repository');
                 } finally {
                     setLoading(false);
                 }
@@ -162,7 +197,7 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        message: 'Update products via Admin Studio',
+                        message: 'Update products catalog via Admin Studio',
                         content: btoa(unescape(encodeURIComponent(JSON.stringify(updatedList, null, 2)))),
                         sha: sha || undefined
                     })
@@ -270,15 +305,18 @@
 
                     <main className="max-w-7xl mx-auto px-4 py-10 flex-grow w-full space-y-8">
                         <div className="bg-neutral-950 p-6 rounded-3xl border border-amber-500/30 flex flex-col sm:flex-row gap-4 items-center justify-between">
-                            <input
-                                type="text"
-                                value={searchQuery}
-                                onChange={e => setSearchQuery(e.target.value)}
-                                placeholder="Search current items..."
-                                className="w-full bg-neutral-900 border border-amber-500/30 rounded-xl px-4 py-2.5 text-sm text-neutral-100 focus:outline-none"
-                            />
-                            <button onClick={() => loadRepositoryData(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl whitespace-nowrap">
-                                🔄 Refresh Repo Data
+                            <div className="w-full">
+                                <input
+                                    type="text"
+                                    value={searchQuery}
+                                    onChange={e => setSearchQuery(e.target.value)}
+                                    placeholder="Search current items..."
+                                    className="w-full bg-neutral-900 border border-amber-500/30 rounded-xl px-4 py-2.5 text-sm text-neutral-100 focus:outline-none"
+                                />
+                                <p className="text-[11px] text-amber-400 font-mono mt-1.5">📂 Status: {loadedSourceFile}</p>
+                            </div>
+                            <button onClick={() => autoDiscoverAndLoadRepo(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl whitespace-nowrap">
+                                🔄 Re-Scan Repo Files
                             </button>
                         </div>
 
@@ -286,11 +324,11 @@
                             <h3 className="font-serif text-2xl font-bold text-amber-100 border-b border-neutral-800 pb-3">All Repository Items ({filteredItems.length})</h3>
 
                             {loading ? (
-                                <p className="text-center text-amber-400 py-12">Scanning repository folders...</p>
+                                <p className="text-center text-amber-400 py-12">Auto-discovering repository files and catalog data...</p>
                             ) : filteredItems.length === 0 ? (
                                 <div className="border border-dashed border-amber-500/40 rounded-3xl p-12 text-center bg-neutral-950 space-y-3">
-                                    <p className="text-sm text-neutral-400">No items found automatically in this repository.</p>
-                                    <button onClick={addNewItem} className="bg-amber-600 text-white text-xs px-4 py-2 rounded-xl font-semibold">Add Your First Item</button>
+                                    <p className="text-sm text-neutral-400">No catalog items found in this repository.</p>
+                                    <button onClick={addNewItem} className="bg-amber-600 text-white text-xs px-4 py-2 rounded-xl font-semibold">Add First Item</button>
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
