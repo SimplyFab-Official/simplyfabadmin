@@ -63,6 +63,7 @@
             const [products, setProducts] = React.useState([]);
             const [searchQuery, setSearchQuery] = React.useState('');
             const [loading, setLoading] = React.useState(false);
+            const [loadedSource, setLoadedSource] = React.useState('Scanning...');
             const [editingItem, setEditingItem] = React.useState(null);
             const [editForm, setEditForm] = React.useState({ id: '', name: '', price: '', imageUrl: '' });
 
@@ -71,42 +72,58 @@
             };
 
             React.useEffect(() => {
-                fetchAllRepoItems(selectedRepo);
+                discoverAndFetchRepo(selectedRepo);
             }, [selectedRepo]);
 
-            const fetchAllRepoItems = async (repo) => {
+            const discoverAndFetchRepo = async (repo) => {
                 setLoading(true);
+                setLoadedSource('Scanning repository files...');
                 try {
                     let items = [];
-                    const paths = ['products.json', 'data/products.json', 'catalog.json', 'src/products.json'];
+                    let sourceName = '';
 
-                    for (const path of paths) {
-                        try {
-                            const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
-                                headers: { Authorization: `token ${token}` }
-                            });
-                            if (res.ok) {
-                                const fileData = await res.json();
-                                if (fileData && fileData.content) {
-                                    const decoded = JSON.parse(atob(fileData.content.replace(/\n/g, '')));
-                                    if (Array.isArray(decoded) && decoded.length > 0) {
-                                        items = decoded;
+                    // Fetch full repository tree to locate any JSON file containing products
+                    const treeRes = await fetch(`https://api.github.com/repos/${repo}/git/trees/main?recursive=1`, {
+                        headers: { Authorization: `token ${token}` }
+                    });
+
+                    if (treeRes.ok) {
+                        const treeData = await treeRes.json();
+                        const jsonFiles = treeData.tree.filter(f => f.path.endsWith('.json') && !f.path.includes('package') && !f.path.includes('order'));
+
+                        for (const file of jsonFiles) {
+                            const fileRes = await fetch(`https://raw.githubusercontent.com/${repo}/main/${file.path}?t=${Date.now()}`);
+                            if (fileRes.ok) {
+                                const jsonContent = await fileRes.json();
+                                if (Array.isArray(jsonContent) && jsonContent.length > 0) {
+                                    items = jsonContent;
+                                    sourceName = file.path;
+                                    break;
+                                } else if (jsonContent && typeof jsonContent === 'object') {
+                                    const key = Object.keys(jsonContent).find(k => Array.isArray(jsonContent[k]) && jsonContent[k].length > 0);
+                                    if (key) {
+                                        items = jsonContent[key];
+                                        sourceName = `${file.path} (${key})`;
                                         break;
-                                    } else if (decoded && typeof decoded === 'object') {
-                                        const foundKey = Object.keys(decoded).find(k => Array.isArray(decoded[k]) && decoded[k].length > 0);
-                                        if (foundKey) {
-                                            items = decoded[foundKey];
-                                            break;
-                                        }
                                     }
                                 }
                             }
-                        } catch (e) {}
+                        }
                     }
 
                     if (items.length === 0) {
                         const cached = localStorage.getItem(`cache_products_${repo}`);
-                        if (cached) items = JSON.parse(cached);
+                        if (cached) {
+                            items = JSON.parse(cached);
+                            sourceName = 'Browser Cache';
+                        }
+                    }
+
+                    if (items.length === 0) {
+                        items = [
+                            { id: 'Item 001', name: 'Haute Couture Evening Gown 001', price: 299.99, imageUrl: getSvgPlaceholder('Item 001') }
+                        ];
+                        sourceName = 'Default Fallback';
                     }
 
                     const normalized = items.map((item, idx) => {
@@ -126,9 +143,11 @@
                     });
 
                     setProducts(normalized);
+                    setLoadedSource(`Loaded from [${sourceName}]`);
                     localStorage.setItem(`cache_products_${repo}`, JSON.stringify(normalized));
                 } catch (e) {
                     setProducts([]);
+                    setLoadedSource('Error scanning repo');
                 } finally {
                     setLoading(false);
                 }
@@ -208,7 +227,7 @@
                 <div className="flex flex-col min-h-screen bg-neutral-950 text-neutral-100">
                     <div className="bg-gradient-to-r from-amber-600 via-rose-600 to-amber-600 text-white text-xs py-2 px-4 text-center font-medium tracking-widest uppercase overflow-hidden whitespace-nowrap shadow-sm">
                         <div className="animate-marquee">
-                            EXQUISITE HANDCRAFTED HAUTE COUTURE &bull; LIVE REPOSITORY CATALOGUE &bull; SIMPLE FAB 2.0
+                            EXQUISITE HANDCRAFTED HAUTE COUTURE &bull; MULTI-REPO CATALOGUE &bull; SIMPLE FAB 2.0
                         </div>
                     </div>
 
@@ -232,7 +251,7 @@
                         <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-neutral-900 p-6 rounded-3xl border border-amber-500/30">
                             <div>
                                 <h2 className="font-serif text-2xl font-bold text-amber-100">Live Website Catalog ({filteredItems.length} items)</h2>
-                                <p className="text-xs text-neutral-400 mt-1">Viewing repository: <strong className="text-cyan-400 font-mono">{selectedRepo}</strong></p>
+                                <p className="text-xs text-neutral-400 mt-1">Status: <strong className="text-emerald-400 font-mono">{loadedSource}</strong></p>
                             </div>
                             <div className="flex gap-3 w-full sm:w-auto">
                                 <input
@@ -242,12 +261,12 @@
                                     placeholder="Search items..."
                                     className="bg-neutral-950 border border-amber-500/30 rounded-xl px-4 py-2 text-xs text-white focus:outline-none"
                                 />
-                                <button onClick={() => fetchAllRepoItems(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2 rounded-xl font-semibold whitespace-nowrap">🔄 Refresh</button>
+                                <button onClick={() => discoverAndFetchRepo(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2 rounded-xl font-semibold whitespace-nowrap">🔄 Refresh</button>
                             </div>
                         </div>
 
                         {loading ? (
-                            <p className="text-center text-amber-400 py-16 font-mono text-sm">Fetching all repository records from GitHub...</p>
+                            <p className="text-center text-amber-400 py-16 font-mono text-sm">Auto-discovering repository catalog files from GitHub...</p>
                         ) : filteredItems.length === 0 ? (
                             <div className="border border-dashed border-amber-500/40 rounded-3xl p-16 text-center bg-neutral-900/50 space-y-4">
                                 <p className="text-sm text-neutral-400">No items found in this repository.</p>
