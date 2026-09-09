@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Fab 2.0 | Secure Multi-Repo Admin Studio</title>
+    <title>Simple Fab 2.0 | Haute Couture Catalog</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -26,7 +26,8 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        function SecureAdminStudio() {
+        function SimpleFabApp() {
+            const [isAdminOpen, setIsAdminOpen] = React.useState(false);
             const [isAuthenticated, setIsAuthenticated] = React.useState(sessionStorage.getItem('auth_pass') === '021910');
             const [passInput, setPassInput] = React.useState('');
             const [passError, setPassError] = React.useState(false);
@@ -36,6 +37,7 @@
                 if (passInput === '021910') {
                     sessionStorage.setItem('auth_pass', '021910');
                     setIsAuthenticated(true);
+                    setPassError(false);
                 } else {
                     setPassError(true);
                 }
@@ -58,83 +60,46 @@
                 'SimplyFab-Official/desktop-tutorial'
             ];
 
-            const [activeTab, setActiveTab] = React.useState('live-view');
             const [products, setProducts] = React.useState([]);
             const [searchQuery, setSearchQuery] = React.useState('');
-            const [loading, setLoading] = React.useState(false);
-
-            const repoParts = selectedRepo.split('/');
-            const orgName = repoParts[0] ? repoParts[0].toLowerCase() : '';
-            const repoName = repoParts[1] || '';
-            const liveWebsiteUrl = `https://${orgName}.github.io/${repoName}/`;
+            const [editingItem, setEditingItem] = React.useState(null);
+            const [editForm, setEditForm] = React.useState({ id: '', name: '', price: '' });
 
             const getSvgPlaceholder = (text) => {
                 return `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"><rect width="100%" height="100%" fill="%23171717"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23d4d4d4" font-family="sans-serif" font-size="16">${encodeURIComponent(text)}</text></svg>`;
             };
 
             React.useEffect(() => {
-                if (isAuthenticated) {
-                    autoFetchRepositoryProducts(selectedRepo);
-                }
-            }, [selectedRepo, isAuthenticated]);
+                fetchRepoProducts(selectedRepo);
+            }, [selectedRepo]);
 
-            const autoFetchRepositoryProducts = async (repo) => {
-                setLoading(true);
+            const fetchRepoProducts = async (repo) => {
                 try {
-                    let fetchedItems = [];
-                    const paths = ['products.json', 'data/products.json', 'catalog.json'];
-
-                    for (const path of paths) {
-                        try {
-                            const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
-                                headers: { Authorization: `token ${token}` }
-                            });
-                            if (res.ok) {
-                                const fileData = await res.json();
-                                if (fileData && fileData.content) {
-                                    const decoded = JSON.parse(atob(fileData.content.replace(/\n/g, '')));
-                                    if (Array.isArray(decoded) && decoded.length > 0) {
-                                        fetchedItems = decoded;
-                                        break;
-                                    }
-                                }
-                            }
-                        } catch (e) {}
+                    let items = [];
+                    const res = await fetch(`https://api.github.com/repos/${repo}/contents/products.json`, {
+                        headers: { Authorization: `token ${token}` }
+                    });
+                    if (res.ok) {
+                        const fileData = await res.json();
+                        if (fileData && fileData.content) {
+                            items = JSON.parse(atob(fileData.content.replace(/\n/g, '')));
+                        }
                     }
-
-                    if (fetchedItems.length === 0) {
+                    if (items.length === 0) {
                         const cached = localStorage.getItem(`cache_products_${repo}`);
-                        if (cached) fetchedItems = JSON.parse(cached);
+                        if (cached) items = JSON.parse(cached);
                     }
-
-                    if (fetchedItems.length === 0) {
-                        fetchedItems = [
+                    if (items.length === 0) {
+                        items = [
                             { id: 'Item 001', name: 'Haute Couture Evening Gown 001', price: 299.99, imageUrl: getSvgPlaceholder('Item 001') },
                             { id: 'Item 002', name: 'Haute Couture Evening Gown 002', price: 349.99, imageUrl: getSvgPlaceholder('Item 002') },
                             { id: 'Item 003', name: 'Haute Couture Evening Gown 003', price: 399.99, imageUrl: getSvgPlaceholder('Item 003') }
                         ];
                     }
-
-                    const normalized = fetchedItems.map((item, idx) => {
-                        const itemId = item.id || item.itemNo || `Item ${String(idx + 1).padStart(3, '0')}`;
-                        let img = item.imageUrl || item.image || item.cover || item.photo || item.picture || (Array.isArray(item.gallery) ? item.gallery[0] : null);
-                        if (img && !img.startsWith('http') && !img.startsWith('data:')) {
-                            img = `https://raw.githubusercontent.com/${repo}/main/${img.startsWith('/') ? img.substring(1) : img}`;
-                        }
-                        return {
-                            id: String(itemId),
-                            name: item.name || item.title || `Gown ${idx + 1}`,
-                            price: parseFloat(item.price || 0),
-                            imageUrl: img || getSvgPlaceholder(itemId)
-                        };
-                    });
-
-                    setProducts(normalized);
-                    localStorage.setItem(`cache_products_${repo}`, JSON.stringify(normalized));
+                    setProducts(items);
+                    localStorage.setItem(`cache_products_${repo}`, JSON.stringify(items));
                 } catch (e) {
                     setProducts([]);
-                } finally {
-                    setLoading(false);
                 }
             };
 
@@ -156,31 +121,25 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        message: 'Update products via Admin Studio',
+                        message: 'Update products catalog via Live Website Admin Access',
                         content: btoa(unescape(encodeURIComponent(JSON.stringify(updatedList, null, 2)))),
                         sha: sha || undefined
                     })
                 });
             };
 
-            const updateItemField = async (targetId, fieldName, newValue) => {
-                const updated = products.map(p => {
-                    if (p.id === targetId) {
-                        return { 
-                            ...p, 
-                            [fieldName]: fieldName === 'price' ? (parseFloat(newValue) || 0) : newValue,
-                            ...(fieldName === 'id' ? { id: newValue } : {})
-                        };
-                    }
-                    return p;
-                });
+            const handleSaveEdit = async (e) => {
+                e.preventDefault();
+                const updated = products.map(p => p.id === editingItem.id ? { ...p, id: editForm.id, name: editForm.name, price: parseFloat(editForm.price) || 0 } : p);
                 setProducts(updated);
                 localStorage.setItem(`cache_products_${selectedRepo}`, JSON.stringify(updated));
                 await commitToGitHub(updated);
+                setEditingItem(null);
+                alert(`Item updated successfully!`);
             };
 
-            const deleteItem = async (targetId) => {
-                if (!confirm(`Permanently delete item "${targetId}"?`)) return;
+            const handleDeleteItem = async (targetId) => {
+                if (!confirm(`Are you sure you want to delete item "${targetId}"?`)) return;
                 const updated = products.filter(p => p.id !== targetId);
                 setProducts(updated);
                 localStorage.setItem(`cache_products_${selectedRepo}`, JSON.stringify(updated));
@@ -214,166 +173,214 @@
                 return item.name.toLowerCase().includes(q) || item.id.toLowerCase().includes(q);
             });
 
-            if (!isAuthenticated) {
-                return (
-                    <div className="flex flex-col items-center justify-center min-h-screen bg-neutral-950 px-4">
-                        <div className="w-full max-w-md bg-neutral-900 border border-amber-500/30 p-8 rounded-3xl shadow-2xl space-y-6 text-center">
-                            <div className="w-14 h-14 mx-auto rounded-full bg-gradient-to-tr from-amber-600 to-rose-500 flex items-center justify-center text-white font-serif font-bold text-xl">SF</div>
-                            <h1 className="font-serif text-2xl font-bold text-amber-100">Admin Authorization</h1>
-                            <form onSubmit={handleLogin} className="space-y-4">
-                                <input
-                                    type="password"
-                                    maxLength="6"
-                                    placeholder="Enter PIN"
-                                    value={passInput}
-                                    onChange={e => { setPassInput(e.target.value); setPassError(false); }}
-                                    className="w-full bg-neutral-950 border border-amber-500/40 rounded-xl px-4 py-3 text-center text-lg tracking-widest text-amber-300 font-mono focus:outline-none"
-                                    autoFocus
-                                    required
-                                />
-                                {passError && <p className="text-xs text-rose-400">Incorrect PIN.</p>}
-                                <button type="submit" className="w-full bg-gradient-to-r from-amber-600 to-rose-600 text-white font-semibold py-3.5 rounded-xl text-xs uppercase tracking-wider">Unlock Studio</button>
-                            </form>
+            return (
+                <div className="flex flex-col min-h-screen bg-neutral-950 text-neutral-100">
+                    <div className="bg-gradient-to-r from-amber-600 via-rose-600 to-amber-600 text-white text-xs py-2 px-4 text-center font-medium tracking-widest uppercase overflow-hidden whitespace-nowrap shadow-sm">
+                        <div className="animate-marquee">
+                            EXQUISITE HANDCRAFTED HAUTE COUTURE &bull; BESPOKE EVENING GOWNS &bull; SIMPLE FAB 2.0
                         </div>
                     </div>
-                );
-            }
 
-            return (
-                <div className="flex flex-col min-h-screen bg-neutral-900 text-neutral-100">
-                    <header className="border-b border-neutral-800 bg-neutral-950 px-6 py-4 flex flex-wrap items-center justify-between gap-4 shadow-xl">
+                    <header className="border-b border-neutral-800 bg-neutral-900/90 px-6 py-5 flex items-center justify-between sticky top-0 z-30 shadow-xl backdrop-blur-md">
                         <div className="flex items-center space-x-3">
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-amber-600 to-rose-500 flex items-center justify-center text-white font-serif font-bold text-sm">SF</div>
-                            <div>
-                                <h1 className="font-serif text-lg font-bold text-amber-100">Simple Fab Master Studio</h1>
-                                <select
-                                    value={selectedRepo}
-                                    onChange={(e) => setSelectedRepo(e.target.value)}
-                                    className="bg-neutral-900 border border-amber-500/40 text-[11px] px-2.5 py-1 rounded text-amber-300 font-mono focus:outline-none mt-1"
-                                >
-                                    {repositories.map(r => <option key={r} value={r}>{r}</option>)}
-                                </select>
-                            </div>
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-amber-600 via-rose-500 to-amber-400 flex items-center justify-center text-white font-serif font-bold text-sm shadow-md border border-amber-300/40">SF</div>
+                            <h1 className="font-serif text-xl font-bold tracking-wide text-amber-100">Simple Fab 2.0</h1>
                         </div>
-
-                        <div className="flex bg-neutral-900 p-1 rounded-xl border border-neutral-800 text-xs font-semibold">
-                            <button onClick={() => setActiveTab('live-view')} className={`px-4 py-2 rounded-lg transition ${activeTab === 'live-view' ? 'bg-amber-600 text-white' : 'text-neutral-400 hover:text-white'}`}>🌐 Whole Website Live View</button>
-                            <button onClick={() => setActiveTab('editor')} className={`px-4 py-2 rounded-lg transition ${activeTab === 'editor' ? 'bg-amber-600 text-white' : 'text-neutral-400 hover:text-white'}`}>✏️ Edit & Delete Manager ({products.length})</button>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                            <button onClick={() => { sessionStorage.removeItem('auth_pass'); setIsAuthenticated(false); }} className="bg-neutral-800 text-neutral-300 text-xs px-3 py-2 rounded-xl">Lock</button>
-                        </div>
+                        <nav className="hidden md:flex items-center space-x-8 text-xs tracking-wider uppercase text-neutral-300">
+                            <span className="text-amber-300 font-semibold cursor-pointer">Collection</span>
+                            <span className="hover:text-amber-300 transition cursor-pointer">Atelier</span>
+                            <span className="hover:text-amber-300 transition cursor-pointer">Bespoke</span>
+                        </nav>
                     </header>
 
-                    <main className="flex-grow w-full flex flex-col">
-                        {activeTab === 'live-view' && (
-                            <div className="flex flex-col flex-grow w-full p-4 space-y-4">
-                                <div className="flex justify-between items-center bg-neutral-950 px-6 py-3 rounded-2xl border border-amber-500/30">
-                                    <p className="text-xs text-neutral-300">Viewing live repository website: <strong className="text-cyan-400 font-mono">{liveWebsiteUrl}</strong></p>
-                                    <a href={liveWebsiteUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-amber-300 underline font-mono">Open in Full Tab ↗</a>
-                                </div>
-                                <div className="flex-grow w-full h-[750px] rounded-3xl overflow-hidden border-2 border-amber-500/40 bg-neutral-950 shadow-2xl">
-                                    <iframe key={selectedRepo} src={liveWebsiteUrl} title="Live Website Preview" className="w-full h-full border-0 bg-neutral-950" />
-                                </div>
-                            </div>
-                        )}
+                    <main className="max-w-7xl mx-auto px-4 py-12 flex-grow w-full space-y-12">
+                        <div className="text-center space-y-4 max-w-2xl mx-auto">
+                            <span className="text-amber-300 text-xs font-semibold tracking-widest uppercase bg-amber-950/60 px-3.5 py-1.5 rounded-full border border-amber-500/30">Masterful Craftsmanship</span>
+                            <h2 className="font-serif text-4xl sm:text-5xl font-bold text-amber-50">Exquisite Haute Couture Gowns</h2>
+                            <p className="text-neutral-400 text-sm font-light">Explore our curated collection of luxury hand-stitched garments.</p>
+                        </div>
 
-                        {activeTab === 'editor' && (
-                            <div className="max-w-7xl mx-auto px-4 py-10 w-full space-y-8">
-                                <div className="bg-neutral-950 p-6 rounded-3xl border border-amber-500/30 flex flex-col sm:flex-row gap-4 items-center justify-between">
-                                    <input
-                                        type="text"
-                                        value={searchQuery}
-                                        onChange={e => setSearchQuery(e.target.value)}
-                                        placeholder="Search catalog items..."
-                                        className="w-full bg-neutral-900 border border-amber-500/30 rounded-xl px-4 py-2.5 text-sm text-neutral-100 focus:outline-none"
-                                    />
-                                    <div className="flex gap-3 w-full sm:w-auto">
-                                        <button onClick={addNewItem} className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-md whitespace-nowrap">+ Add New Gown</button>
-                                        <button onClick={() => autoFetchRepositoryProducts(selectedRepo)} className="w-full sm:w-auto bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl whitespace-nowrap">🔄 Refresh</button>
-                                    </div>
-                                </div>
-
-                                <div className="space-y-6">
-                                    <h3 className="font-serif text-2xl font-bold text-amber-100 border-b border-neutral-800 pb-3">Edit & Delete Catalog Items ({filteredItems.length})</h3>
-
-                                    {loading ? (
-                                        <p className="text-center text-amber-400 py-12">Loading repository items...</p>
-                                    ) : filteredItems.length === 0 ? (
-                                        <div className="border border-dashed border-amber-500/40 rounded-3xl p-12 text-center bg-neutral-950 space-y-3">
-                                            <p className="text-sm text-neutral-400">No items found.</p>
+                        {/* PUBLIC CATALOG GRID */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                            {products.map((item) => {
+                                const imgUrl = item.imageUrl || item.image || getSvgPlaceholder(item.id);
+                                return (
+                                    <div key={item.id} className="bg-neutral-900 border border-amber-500/20 rounded-2xl overflow-hidden shadow-xl flex flex-col justify-between group">
+                                        <div className="h-64 overflow-hidden bg-neutral-950 relative flex items-center justify-center p-2">
+                                            <img src={imgUrl} alt={item.name} className="w-full h-full object-cover rounded-lg group-hover:scale-105 transition duration-500" />
+                                            <span className="absolute top-3 left-3 bg-neutral-950/80 px-2.5 py-1 rounded-full text-[10px] font-mono text-amber-300 border border-amber-500/30">{item.id}</span>
                                         </div>
-                                    ) : (
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                                        <div className="p-4 space-y-2 bg-neutral-900 flex-grow flex flex-col justify-between">
+                                            <div>
+                                                <h4 className="font-serif text-sm font-bold text-amber-100">{item.name}</h4>
+                                                <p className="text-emerald-400 font-mono text-xs font-semibold mt-1">${item.price.toFixed(2)}</p>
+                                            </div>
+                                            <button className="w-full bg-amber-600/20 hover:bg-amber-600 text-amber-200 hover:text-white border border-amber-500/40 text-xs py-2 rounded-xl transition font-semibold">
+                                                Inquire / Book Fitting
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </main>
+
+                    {/* DISCREET FLOATING ADMIN ACCESS TRIGGER */}
+                    <div className="fixed bottom-6 right-6 z-40">
+                        <button
+                            onClick={() => setIsAdminOpen(true)}
+                            className="bg-gradient-to-r from-amber-600 via-rose-600 to-amber-600 hover:scale-105 text-white text-xs font-semibold px-4 py-3 rounded-full shadow-2xl border-2 border-amber-300/60 transition flex items-center gap-2 cursor-pointer"
+                            title="Open Admin Studio"
+                        >
+                            <span>🔒 Admin Studio</span>
+                        </button>
+                    </div>
+
+                    {/* ADMIN STUDIO MODAL */}
+                    {isAdminOpen && (
+                        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4 overflow-y-auto">
+                            <div className="bg-neutral-900 border-2 border-amber-500/50 rounded-3xl max-w-5xl w-full p-6 sm:p-8 space-y-6 shadow-2xl relative my-8 max-h-[90vh] overflow-y-auto">
+                                <div className="flex justify-between items-center border-b border-neutral-800 pb-4">
+                                    <div className="flex items-center space-x-3">
+                                        <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-amber-600 to-rose-500 flex items-center justify-center text-white font-serif font-bold text-xs">SF</div>
+                                        <div>
+                                            <h3 className="font-serif text-xl font-bold text-amber-100">Simple Fab Master Studio</h3>
+                                            <p className="text-[11px] text-neutral-400">Manage repository products, edit, update, or delete items instantly.</p>
+                                        </div>
+                                    </div>
+                                    <button onClick={() => setIsAdminOpen(false)} className="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs px-3 py-1.5 rounded-xl font-bold">✕ Close</button>
+                                </div>
+
+                                {!isAuthenticated ? (
+                                    <div className="max-w-md mx-auto py-10 space-y-6 text-center">
+                                        <h4 className="font-serif text-xl font-bold text-amber-100">Admin Authorization Required</h4>
+                                        <p className="text-xs text-neutral-400">Enter PIN <strong className="text-amber-300">021910</strong> to access admin controls.</p>
+                                        <form onSubmit={handleLogin} className="space-y-4">
+                                            <input
+                                                type="password"
+                                                maxLength="6"
+                                                placeholder="Enter Admin PIN"
+                                                value={passInput}
+                                                onChange={e => { setPassInput(e.target.value); setPassError(false); }}
+                                                className="w-full bg-neutral-950 border border-amber-500/40 rounded-xl px-4 py-3 text-center text-lg tracking-widest text-amber-300 font-mono focus:outline-none"
+                                                autoFocus
+                                                required
+                                            />
+                                            {passError && <p className="text-xs text-rose-400 font-medium">Incorrect PIN code.</p>}
+                                            <button type="submit" className="w-full bg-gradient-to-r from-amber-600 to-rose-600 text-white font-semibold py-3.5 rounded-xl text-xs uppercase tracking-wider">Unlock Studio</button>
+                                        </form>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-6">
+                                        <div className="flex flex-wrap items-center justify-between gap-4 bg-neutral-950 p-4 rounded-2xl border border-amber-500/30">
+                                            <div className="flex items-center gap-3">
+                                                <select
+                                                    value={selectedRepo}
+                                                    onChange={(e) => setSelectedRepo(e.target.value)}
+                                                    className="bg-neutral-900 border border-amber-500/40 text-xs px-3 py-2 rounded-xl text-amber-300 font-mono focus:outline-none"
+                                                >
+                                                    {repositories.map(r => <option key={r} value={r}>{r}</option>)}
+                                                </select>
+                                                <button onClick={addNewItem} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2 rounded-xl shadow">+ Add New Gown</button>
+                                            </div>
+                                            <input
+                                                type="text"
+                                                value={searchQuery}
+                                                onChange={e => setSearchQuery(e.target.value)}
+                                                placeholder="Search catalog..."
+                                                className="bg-neutral-900 border border-amber-500/30 rounded-xl px-3 py-2 text-xs text-white focus:outline-none"
+                                            />
+                                        </div>
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                                             {filteredItems.map((item) => (
-                                                <div key={item.id} className="bg-neutral-950 border-2 border-amber-500/60 rounded-2xl overflow-hidden shadow-2xl flex flex-col justify-between">
-                                                    <div className="h-48 overflow-hidden bg-neutral-900 relative flex items-center justify-center p-2">
-                                                        <img 
-                                                            src={item.imageUrl} 
-                                                            alt={item.name} 
-                                                            className="w-full h-full object-cover rounded-lg" 
-                                                            onError={(e) => { e.target.onerror = null; e.target.src = getSvgPlaceholder(item.id); }}
-                                                        />
+                                                <div key={item.id} className="bg-neutral-950 border border-amber-500/50 rounded-2xl p-4 space-y-3 shadow-xl flex flex-col justify-between">
+                                                    <div className="flex items-center gap-3">
+                                                        <img src={item.imageUrl || item.image} alt={item.name} className="w-14 h-14 object-cover rounded-xl border border-neutral-800" />
+                                                        <div className="overflow-hidden">
+                                                            <p className="text-[10px] text-amber-300 font-mono font-bold">{item.id}</p>
+                                                            <h5 className="font-serif text-xs font-bold text-white truncate">{item.name}</h5>
+                                                            <p className="text-emerald-400 font-mono text-[11px]">${item.price.toFixed(2)}</p>
+                                                        </div>
                                                     </div>
-                                                    <div className="p-4 space-y-3 bg-neutral-900 flex-grow flex flex-col justify-between">
-                                                        <div className="space-y-2">
-                                                            <div>
-                                                                <label className="block text-[9px] text-amber-300 font-bold uppercase">Gown ID / Number</label>
-                                                                <input
-                                                                    type="text"
-                                                                    defaultValue={item.id}
-                                                                    onBlur={(e) => updateItemField(item.id, 'id', e.target.value)}
-                                                                    className="w-full bg-neutral-950 border border-amber-500/60 rounded-lg px-2.5 py-1.5 text-xs text-amber-300 font-mono font-bold focus:outline-none"
-                                                                />
-                                                            </div>
-                                                            <div>
-                                                                <label className="block text-[9px] text-amber-300 font-bold uppercase">Gown Name</label>
-                                                                <input
-                                                                    type="text"
-                                                                    defaultValue={item.name}
-                                                                    onBlur={(e) => updateItemField(item.id, 'name', e.target.value)}
-                                                                    className="w-full bg-neutral-950 border border-amber-500/60 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none font-serif"
-                                                                />
-                                                            </div>
-                                                            <div>
-                                                                <label className="block text-[9px] text-emerald-400 font-bold uppercase">Price ($)</label>
-                                                                <input
-                                                                    type="number"
-                                                                    step="0.01"
-                                                                    defaultValue={item.price}
-                                                                    onBlur={(e) => updateItemField(item.id, 'price', e.target.value)}
-                                                                    className="w-full bg-neutral-950 border border-emerald-500/60 rounded-lg px-2.5 py-1.5 text-xs text-emerald-300 font-mono font-bold focus:outline-none"
-                                                                />
-                                                            </div>
-                                                        </div>
-                                                        <div className="pt-3 border-t border-neutral-800">
-                                                            <button
-                                                                onClick={() => deleteItem(item.id)}
-                                                                className="w-full bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-600 text-xs py-2.5 rounded-xl font-bold transition cursor-pointer shadow-lg flex items-center justify-center gap-1.5"
-                                                            >
-                                                                🗑️ Delete from Website
-                                                            </button>
-                                                        </div>
+                                                    <div className="flex gap-2 pt-2 border-t border-neutral-800">
+                                                        <button
+                                                            onClick={() => { setEditingItem(item); setEditForm({ id: item.id, name: item.name, price: item.price }); }}
+                                                            className="w-1/2 bg-amber-600 hover:bg-amber-500 text-white text-[11px] py-2 rounded-xl font-semibold transition"
+                                                        >
+                                                            ✏️ Edit
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDeleteItem(item.id)}
+                                                            className="w-1/2 bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-700 text-[11px] py-2 rounded-xl font-bold transition"
+                                                        >
+                                                            🗑️ Delete
+                                                        </button>
                                                     </div>
                                                 </div>
                                             ))}
                                         </div>
-                                    )}
-                                </div>
+                                    </div>
+                                )}
                             </div>
-                        )}
-                    </main>
+                        </div>
+                    )}
 
-                    <footer className="border-t border-neutral-800 bg-neutral-950 py-6 text-center text-xs text-neutral-400 mt-12">
-                        <p className="font-serif text-amber-200 text-sm">Simple Fab 2.0 Central Admin Studio</p>
-                        <p>&copy; 2026 Developed by Jeff O.</p>
+                    {/* EDIT MODAL */}
+                    {editingItem && (
+                        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4">
+                            <div className="bg-neutral-900 border border-amber-500/40 p-6 rounded-3xl max-w-md w-full space-y-4">
+                                <h3 className="font-serif text-lg font-bold text-amber-100">Edit Item: {editingItem.id}</h3>
+                                <form onSubmit={handleSaveEdit} className="space-y-3">
+                                    <div>
+                                        <label className="block text-[10px] text-amber-300 uppercase font-bold">Item ID / Gown Number</label>
+                                        <input
+                                            type="text"
+                                            value={editForm.id}
+                                            onChange={e => setEditForm({ ...editForm, id: e.target.value })}
+                                            className="w-full bg-neutral-950 border border-neutral-700 rounded-xl px-3 py-2 text-xs text-amber-300 font-mono"
+                                            required
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] text-amber-300 uppercase font-bold">Gown Name</label>
+                                        <input
+                                            type="text"
+                                            value={editForm.name}
+                                            onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+                                            className="w-full bg-neutral-950 border border-neutral-700 rounded-xl px-3 py-2 text-xs text-white"
+                                            required
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] text-emerald-400 uppercase font-bold">Price ($)</label>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            value={editForm.price}
+                                            onChange={e => setEditForm({ ...editForm, price: e.target.value })}
+                                            className="w-full bg-neutral-950 border border-neutral-700 rounded-xl px-3 py-2 text-xs text-emerald-300 font-mono"
+                                            required
+                                        />
+                                    </div>
+                                    <div className="flex justify-end gap-2 pt-2">
+                                        <button type="button" onClick={() => setEditingItem(null)} className="bg-neutral-800 text-neutral-300 text-xs px-4 py-2 rounded-xl">Cancel</button>
+                                        <button type="submit" className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-5 py-2 rounded-xl">Save Changes</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
+                    <footer className="border-t border-neutral-800 bg-neutral-900 py-8 text-center text-xs text-neutral-400 mt-12 space-y-1">
+                        <p className="font-serif text-amber-200 text-sm">Simple Fab 2.0 Haute Couture</p>
+                        <p>&copy; 2026 All rights reserved. &bull; Developed by Jeff O.</p>
                     </footer>
                 </div>
             );
         }
 
-        ReactDOM.render(<SecureAdminStudio />, document.getElementById('root'));
+        ReactDOM.render(<SimpleFabApp />, document.getElementById('root'));
     </script>
 </body>
 </html>
