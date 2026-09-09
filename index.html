@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Fab 2.0 | Haute Couture Catalog</title>
+    <title>Simple Fab 2.0 | Multi-Repo Admin Studio</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -62,44 +62,75 @@
 
             const [products, setProducts] = React.useState([]);
             const [searchQuery, setSearchQuery] = React.useState('');
+            const [loading, setLoading] = React.useState(false);
             const [editingItem, setEditingItem] = React.useState(null);
-            const [editForm, setEditForm] = React.useState({ id: '', name: '', price: '' });
+            const [editForm, setEditForm] = React.useState({ id: '', name: '', price: '', imageUrl: '' });
 
             const getSvgPlaceholder = (text) => {
                 return `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"><rect width="100%" height="100%" fill="%23171717"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23d4d4d4" font-family="sans-serif" font-size="16">${encodeURIComponent(text)}</text></svg>`;
             };
 
             React.useEffect(() => {
-                fetchRepoProducts(selectedRepo);
+                fetchAllRepoItems(selectedRepo);
             }, [selectedRepo]);
 
-            const fetchRepoProducts = async (repo) => {
+            const fetchAllRepoItems = async (repo) => {
+                setLoading(true);
                 try {
                     let items = [];
-                    const res = await fetch(`https://api.github.com/repos/${repo}/contents/products.json`, {
-                        headers: { Authorization: `token ${token}` }
-                    });
-                    if (res.ok) {
-                        const fileData = await res.json();
-                        if (fileData && fileData.content) {
-                            items = JSON.parse(atob(fileData.content.replace(/\n/g, '')));
-                        }
+                    const paths = ['products.json', 'data/products.json', 'catalog.json', 'src/products.json'];
+
+                    for (const path of paths) {
+                        try {
+                            const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+                                headers: { Authorization: `token ${token}` }
+                            });
+                            if (res.ok) {
+                                const fileData = await res.json();
+                                if (fileData && fileData.content) {
+                                    const decoded = JSON.parse(atob(fileData.content.replace(/\n/g, '')));
+                                    if (Array.isArray(decoded) && decoded.length > 0) {
+                                        items = decoded;
+                                        break;
+                                    } else if (decoded && typeof decoded === 'object') {
+                                        const foundKey = Object.keys(decoded).find(k => Array.isArray(decoded[k]) && decoded[k].length > 0);
+                                        if (foundKey) {
+                                            items = decoded[foundKey];
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e) {}
                     }
+
                     if (items.length === 0) {
                         const cached = localStorage.getItem(`cache_products_${repo}`);
                         if (cached) items = JSON.parse(cached);
                     }
-                    if (items.length === 0) {
-                        items = [
-                            { id: 'Item 001', name: 'Haute Couture Evening Gown 001', price: 299.99, imageUrl: getSvgPlaceholder('Item 001') },
-                            { id: 'Item 002', name: 'Haute Couture Evening Gown 002', price: 349.99, imageUrl: getSvgPlaceholder('Item 002') },
-                            { id: 'Item 003', name: 'Haute Couture Evening Gown 003', price: 399.99, imageUrl: getSvgPlaceholder('Item 003') }
-                        ];
-                    }
-                    setProducts(items);
-                    localStorage.setItem(`cache_products_${repo}`, JSON.stringify(items));
+
+                    const normalized = items.map((item, idx) => {
+                        const itemId = String(item.id || item.itemNo || item.code || `Item ${String(idx + 1).padStart(3, '0')}`);
+                        let img = item.imageUrl || item.imageSrc || item.image || item.cover || item.photo || item.picture || item.img || (Array.isArray(item.gallery) ? item.gallery[0] : null);
+                        
+                        if (img && !img.startsWith('http') && !img.startsWith('data:')) {
+                            img = `https://raw.githubusercontent.com/${repo}/main/${img.startsWith('/') ? img.substring(1) : img}`;
+                        }
+
+                        return {
+                            id: itemId,
+                            name: item.name || item.title || `Gown ${idx + 1}`,
+                            price: parseFloat(item.price || item.cost || 0),
+                            imageUrl: img || getSvgPlaceholder(itemId)
+                        };
+                    });
+
+                    setProducts(normalized);
+                    localStorage.setItem(`cache_products_${repo}`, JSON.stringify(normalized));
                 } catch (e) {
                     setProducts([]);
+                } finally {
+                    setLoading(false);
                 }
             };
 
@@ -121,7 +152,7 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        message: 'Update products catalog via Live Website Admin Access',
+                        message: 'Update products catalog via Admin Studio',
                         content: btoa(unescape(encodeURIComponent(JSON.stringify(updatedList, null, 2)))),
                         sha: sha || undefined
                     })
@@ -130,7 +161,7 @@
 
             const handleSaveEdit = async (e) => {
                 e.preventDefault();
-                const updated = products.map(p => p.id === editingItem.id ? { ...p, id: editForm.id, name: editForm.name, price: parseFloat(editForm.price) || 0 } : p);
+                const updated = products.map(p => p.id === editingItem.id ? { ...p, id: editForm.id, name: editForm.name, price: parseFloat(editForm.price) || 0, imageUrl: editForm.imageUrl } : p);
                 setProducts(updated);
                 localStorage.setItem(`cache_products_${selectedRepo}`, JSON.stringify(updated));
                 await commitToGitHub(updated);
@@ -177,7 +208,7 @@
                 <div className="flex flex-col min-h-screen bg-neutral-950 text-neutral-100">
                     <div className="bg-gradient-to-r from-amber-600 via-rose-600 to-amber-600 text-white text-xs py-2 px-4 text-center font-medium tracking-widest uppercase overflow-hidden whitespace-nowrap shadow-sm">
                         <div className="animate-marquee">
-                            EXQUISITE HANDCRAFTED HAUTE COUTURE &bull; BESPOKE EVENING GOWNS &bull; SIMPLE FAB 2.0
+                            EXQUISITE HANDCRAFTED HAUTE COUTURE &bull; LIVE REPOSITORY CATALOGUE &bull; SIMPLE FAB 2.0
                         </div>
                     </div>
 
@@ -186,43 +217,79 @@
                             <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-amber-600 via-rose-500 to-amber-400 flex items-center justify-center text-white font-serif font-bold text-sm shadow-md border border-amber-300/40">SF</div>
                             <h1 className="font-serif text-xl font-bold tracking-wide text-amber-100">Simple Fab 2.0</h1>
                         </div>
-                        <nav className="hidden md:flex items-center space-x-8 text-xs tracking-wider uppercase text-neutral-300">
-                            <span className="text-amber-300 font-semibold cursor-pointer">Collection</span>
-                            <span className="hover:text-amber-300 transition cursor-pointer">Atelier</span>
-                            <span className="hover:text-amber-300 transition cursor-pointer">Bespoke</span>
-                        </nav>
+                        <div className="flex items-center gap-4">
+                            <select
+                                value={selectedRepo}
+                                onChange={(e) => setSelectedRepo(e.target.value)}
+                                className="bg-neutral-950 border border-amber-500/40 text-xs px-3 py-2 rounded-xl text-amber-300 font-mono focus:outline-none"
+                            >
+                                {repositories.map(r => <option key={r} value={r}>{r}</option>)}
+                            </select>
+                        </div>
                     </header>
 
                     <main className="max-w-7xl mx-auto px-4 py-12 flex-grow w-full space-y-12">
-                        <div className="text-center space-y-4 max-w-2xl mx-auto">
-                            <span className="text-amber-300 text-xs font-semibold tracking-widest uppercase bg-amber-950/60 px-3.5 py-1.5 rounded-full border border-amber-500/30">Masterful Craftsmanship</span>
-                            <h2 className="font-serif text-4xl sm:text-5xl font-bold text-amber-50">Exquisite Haute Couture Gowns</h2>
-                            <p className="text-neutral-400 text-sm font-light">Explore our curated collection of luxury hand-stitched garments.</p>
+                        <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-neutral-900 p-6 rounded-3xl border border-amber-500/30">
+                            <div>
+                                <h2 className="font-serif text-2xl font-bold text-amber-100">Live Website Catalog ({filteredItems.length} items)</h2>
+                                <p className="text-xs text-neutral-400 mt-1">Viewing repository: <strong className="text-cyan-400 font-mono">{selectedRepo}</strong></p>
+                            </div>
+                            <div className="flex gap-3 w-full sm:w-auto">
+                                <input
+                                    type="text"
+                                    value={searchQuery}
+                                    onChange={e => setSearchQuery(e.target.value)}
+                                    placeholder="Search items..."
+                                    className="bg-neutral-950 border border-amber-500/30 rounded-xl px-4 py-2 text-xs text-white focus:outline-none"
+                                />
+                                <button onClick={() => fetchAllRepoItems(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2 rounded-xl font-semibold whitespace-nowrap">🔄 Refresh</button>
+                            </div>
                         </div>
 
-                        {/* PUBLIC CATALOG GRID */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                            {products.map((item) => {
-                                const imgUrl = item.imageUrl || item.image || getSvgPlaceholder(item.id);
-                                return (
-                                    <div key={item.id} className="bg-neutral-900 border border-amber-500/20 rounded-2xl overflow-hidden shadow-xl flex flex-col justify-between group">
-                                        <div className="h-64 overflow-hidden bg-neutral-950 relative flex items-center justify-center p-2">
-                                            <img src={imgUrl} alt={item.name} className="w-full h-full object-cover rounded-lg group-hover:scale-105 transition duration-500" />
-                                            <span className="absolute top-3 left-3 bg-neutral-950/80 px-2.5 py-1 rounded-full text-[10px] font-mono text-amber-300 border border-amber-500/30">{item.id}</span>
+                        {loading ? (
+                            <p className="text-center text-amber-400 py-16 font-mono text-sm">Fetching all repository records from GitHub...</p>
+                        ) : filteredItems.length === 0 ? (
+                            <div className="border border-dashed border-amber-500/40 rounded-3xl p-16 text-center bg-neutral-900/50 space-y-4">
+                                <p className="text-sm text-neutral-400">No items found in this repository.</p>
+                                <button onClick={addNewItem} className="bg-emerald-600 text-white text-xs px-5 py-2.5 rounded-xl font-semibold">+ Add First Gown</button>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                                {filteredItems.map((item) => (
+                                    <div key={item.id} className="bg-neutral-900 border border-amber-500/30 rounded-2xl overflow-hidden shadow-2xl flex flex-col justify-between group">
+                                        <div className="h-60 overflow-hidden bg-neutral-950 relative flex items-center justify-center p-2">
+                                            <img 
+                                                src={item.imageUrl} 
+                                                alt={item.name} 
+                                                className="w-full h-full object-cover rounded-lg group-hover:scale-105 transition duration-500" 
+                                                onError={(e) => { e.target.onerror = null; e.target.src = getSvgPlaceholder(item.id); }}
+                                            />
+                                            <span className="absolute top-3 left-3 bg-neutral-950/90 px-2.5 py-1 rounded-full text-[10px] font-mono text-amber-300 border border-amber-500/40 font-bold">{item.id}</span>
                                         </div>
-                                        <div className="p-4 space-y-2 bg-neutral-900 flex-grow flex flex-col justify-between">
+                                        <div className="p-4 space-y-3 bg-neutral-900 flex-grow flex flex-col justify-between">
                                             <div>
-                                                <h4 className="font-serif text-sm font-bold text-amber-100">{item.name}</h4>
+                                                <h4 className="font-serif text-sm font-bold text-amber-100 truncate">{item.name}</h4>
                                                 <p className="text-emerald-400 font-mono text-xs font-semibold mt-1">${item.price.toFixed(2)}</p>
                                             </div>
-                                            <button className="w-full bg-amber-600/20 hover:bg-amber-600 text-amber-200 hover:text-white border border-amber-500/40 text-xs py-2 rounded-xl transition font-semibold">
-                                                Inquire / Book Fitting
-                                            </button>
+                                            <div className="flex gap-2 pt-2 border-t border-neutral-800">
+                                                <button
+                                                    onClick={() => { setEditingItem(item); setEditForm({ id: item.id, name: item.name, price: item.price, imageUrl: item.imageUrl }); }}
+                                                    className="w-1/2 bg-amber-600 hover:bg-amber-500 text-white text-xs py-2 rounded-xl font-semibold transition"
+                                                >
+                                                    ✏️ Edit / Price
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteItem(item.id)}
+                                                    className="w-1/2 bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-700 text-xs py-2 rounded-xl font-bold transition"
+                                                >
+                                                    🗑️ Delete
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
-                                );
-                            })}
-                        </div>
+                                ))}
+                            </div>
+                        )}
                     </main>
 
                     {/* DISCREET FLOATING ADMIN ACCESS TRIGGER */}
@@ -230,7 +297,6 @@
                         <button
                             onClick={() => setIsAdminOpen(true)}
                             className="bg-gradient-to-r from-amber-600 via-rose-600 to-amber-600 hover:scale-105 text-white text-xs font-semibold px-4 py-3 rounded-full shadow-2xl border-2 border-amber-300/60 transition flex items-center gap-2 cursor-pointer"
-                            title="Open Admin Studio"
                         >
                             <span>🔒 Admin Studio</span>
                         </button>
@@ -239,98 +305,43 @@
                     {/* ADMIN STUDIO MODAL */}
                     {isAdminOpen && (
                         <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4 overflow-y-auto">
-                            <div className="bg-neutral-900 border-2 border-amber-500/50 rounded-3xl max-w-5xl w-full p-6 sm:p-8 space-y-6 shadow-2xl relative my-8 max-h-[90vh] overflow-y-auto">
+                            <div className="bg-neutral-900 border-2 border-amber-500/50 rounded-3xl max-w-md w-full p-6 space-y-6 shadow-2xl relative">
                                 <div className="flex justify-between items-center border-b border-neutral-800 pb-4">
-                                    <div className="flex items-center space-x-3">
-                                        <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-amber-600 to-rose-500 flex items-center justify-center text-white font-serif font-bold text-xs">SF</div>
-                                        <div>
-                                            <h3 className="font-serif text-xl font-bold text-amber-100">Simple Fab Master Studio</h3>
-                                            <p className="text-[11px] text-neutral-400">Manage repository products, edit, update, or delete items instantly.</p>
-                                        </div>
-                                    </div>
-                                    <button onClick={() => setIsAdminOpen(false)} className="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs px-3 py-1.5 rounded-xl font-bold">✕ Close</button>
+                                    <h3 className="font-serif text-xl font-bold text-amber-100">Admin Authorization</h3>
+                                    <button onClick={() => setIsAdminOpen(false)} className="bg-neutral-800 text-neutral-300 text-xs px-3 py-1.5 rounded-xl font-bold">✕ Close</button>
                                 </div>
 
                                 {!isAuthenticated ? (
-                                    <div className="max-w-md mx-auto py-10 space-y-6 text-center">
-                                        <h4 className="font-serif text-xl font-bold text-amber-100">Admin Authorization Required</h4>
-                                        <p className="text-xs text-neutral-400">Enter PIN <strong className="text-amber-300">021910</strong> to access admin controls.</p>
-                                        <form onSubmit={handleLogin} className="space-y-4">
-                                            <input
-                                                type="password"
-                                                maxLength="6"
-                                                placeholder="Enter Admin PIN"
-                                                value={passInput}
-                                                onChange={e => { setPassInput(e.target.value); setPassError(false); }}
-                                                className="w-full bg-neutral-950 border border-amber-500/40 rounded-xl px-4 py-3 text-center text-lg tracking-widest text-amber-300 font-mono focus:outline-none"
-                                                autoFocus
-                                                required
-                                            />
-                                            {passError && <p className="text-xs text-rose-400 font-medium">Incorrect PIN code.</p>}
-                                            <button type="submit" className="w-full bg-gradient-to-r from-amber-600 to-rose-600 text-white font-semibold py-3.5 rounded-xl text-xs uppercase tracking-wider">Unlock Studio</button>
-                                        </form>
-                                    </div>
+                                    <form onSubmit={handleLogin} className="space-y-4">
+                                        <p className="text-xs text-neutral-400">Enter PIN <strong className="text-amber-300">021910</strong> to manage catalog additions.</p>
+                                        <input
+                                            type="password"
+                                            maxLength="6"
+                                            placeholder="Enter PIN"
+                                            value={passInput}
+                                            onChange={e => { setPassInput(e.target.value); setPassError(false); }}
+                                            className="w-full bg-neutral-950 border border-amber-500/40 rounded-xl px-4 py-3 text-center text-lg tracking-widest text-amber-300 font-mono focus:outline-none"
+                                            autoFocus
+                                            required
+                                        />
+                                        {passError && <p className="text-xs text-rose-400 font-medium">Incorrect PIN code.</p>}
+                                        <button type="submit" className="w-full bg-gradient-to-r from-amber-600 to-rose-600 text-white font-semibold py-3.5 rounded-xl text-xs uppercase tracking-wider">Unlock Additions</button>
+                                    </form>
                                 ) : (
-                                    <div className="space-y-6">
-                                        <div className="flex flex-wrap items-center justify-between gap-4 bg-neutral-950 p-4 rounded-2xl border border-amber-500/30">
-                                            <div className="flex items-center gap-3">
-                                                <select
-                                                    value={selectedRepo}
-                                                    onChange={(e) => setSelectedRepo(e.target.value)}
-                                                    className="bg-neutral-900 border border-amber-500/40 text-xs px-3 py-2 rounded-xl text-amber-300 font-mono focus:outline-none"
-                                                >
-                                                    {repositories.map(r => <option key={r} value={r}>{r}</option>)}
-                                                </select>
-                                                <button onClick={addNewItem} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2 rounded-xl shadow">+ Add New Gown</button>
-                                            </div>
-                                            <input
-                                                type="text"
-                                                value={searchQuery}
-                                                onChange={e => setSearchQuery(e.target.value)}
-                                                placeholder="Search catalog..."
-                                                className="bg-neutral-900 border border-amber-500/30 rounded-xl px-3 py-2 text-xs text-white focus:outline-none"
-                                            />
-                                        </div>
-
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                                            {filteredItems.map((item) => (
-                                                <div key={item.id} className="bg-neutral-950 border border-amber-500/50 rounded-2xl p-4 space-y-3 shadow-xl flex flex-col justify-between">
-                                                    <div className="flex items-center gap-3">
-                                                        <img src={item.imageUrl || item.image} alt={item.name} className="w-14 h-14 object-cover rounded-xl border border-neutral-800" />
-                                                        <div className="overflow-hidden">
-                                                            <p className="text-[10px] text-amber-300 font-mono font-bold">{item.id}</p>
-                                                            <h5 className="font-serif text-xs font-bold text-white truncate">{item.name}</h5>
-                                                            <p className="text-emerald-400 font-mono text-[11px]">${item.price.toFixed(2)}</p>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex gap-2 pt-2 border-t border-neutral-800">
-                                                        <button
-                                                            onClick={() => { setEditingItem(item); setEditForm({ id: item.id, name: item.name, price: item.price }); }}
-                                                            className="w-1/2 bg-amber-600 hover:bg-amber-500 text-white text-[11px] py-2 rounded-xl font-semibold transition"
-                                                        >
-                                                            ✏️ Edit
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleDeleteItem(item.id)}
-                                                            className="w-1/2 bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-700 text-[11px] py-2 rounded-xl font-bold transition"
-                                                        >
-                                                            🗑️ Delete
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
+                                    <div className="space-y-4 text-center">
+                                        <p className="text-xs text-emerald-400 font-mono">Admin Studio Unlocked Successfully ✓</p>
+                                        <button onClick={addNewItem} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold py-3 rounded-xl shadow">+ Add New Gown to Repository</button>
                                     </div>
                                 )}
                             </div>
                         </div>
                     )}
 
-                    {/* EDIT MODAL */}
+                    {/* EDIT & PRICE UPDATE MODAL */}
                     {editingItem && (
                         <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4">
                             <div className="bg-neutral-900 border border-amber-500/40 p-6 rounded-3xl max-w-md w-full space-y-4">
-                                <h3 className="font-serif text-lg font-bold text-amber-100">Edit Item: {editingItem.id}</h3>
+                                <h3 className="font-serif text-lg font-bold text-amber-100">Edit Gown & Update Price</h3>
                                 <form onSubmit={handleSaveEdit} className="space-y-3">
                                     <div>
                                         <label className="block text-[10px] text-amber-300 uppercase font-bold">Item ID / Gown Number</label>
@@ -363,9 +374,19 @@
                                             required
                                         />
                                     </div>
+                                    <div>
+                                        <label className="block text-[10px] text-amber-300 uppercase font-bold">Image URL</label>
+                                        <input
+                                            type="text"
+                                            value={editForm.imageUrl}
+                                            onChange={e => setEditForm({ ...editForm, imageUrl: e.target.value })}
+                                            className="w-full bg-neutral-950 border border-neutral-700 rounded-xl px-3 py-2 text-xs text-cyan-300 font-mono"
+                                            required
+                                        />
+                                    </div>
                                     <div className="flex justify-end gap-2 pt-2">
                                         <button type="button" onClick={() => setEditingItem(null)} className="bg-neutral-800 text-neutral-300 text-xs px-4 py-2 rounded-xl">Cancel</button>
-                                        <button type="submit" className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-5 py-2 rounded-xl">Save Changes</button>
+                                        <button type="submit" className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-5 py-2 rounded-xl">Save & Sync</button>
                                     </div>
                                 </form>
                             </div>
