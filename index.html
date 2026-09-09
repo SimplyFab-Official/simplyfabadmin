@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Fab 2.0 | Repo Admin Studio</title>
+    <title>Simple Fab 2.0 | Complete Repo Catalog Manager</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -63,7 +63,7 @@
             const [products, setProducts] = React.useState([]);
             const [searchQuery, setSearchQuery] = React.useState('');
             const [loading, setLoading] = React.useState(false);
-            const [statusMsg, setStatusMsg] = React.useState('Connecting...');
+            const [statusMsg, setStatusMsg] = React.useState('Deep scanning repository...');
             
             const [editingItem, setEditingItem] = React.useState(null);
             const [editForm, setEditForm] = React.useState({ id: '', name: '', price: '', imageUrl: '' });
@@ -73,52 +73,95 @@
             };
 
             React.useEffect(() => {
-                fetchLiveRepoData(selectedRepo);
+                deepScanAllRepoFiles(selectedRepo);
             }, [selectedRepo]);
 
-            const fetchLiveRepoData = async (repo) => {
+            const deepScanAllRepoFiles = async (repo) => {
                 setLoading(true);
-                setStatusMsg('Fetching live from GitHub...');
+                setStatusMsg('Scanning all repository JSON files...');
                 try {
-                    let items = [];
-                    let source = '';
+                    let allDiscoveredItems = [];
+                    let foundSources = [];
 
-                    const endpoints = [
-                        `https://raw.githubusercontent.com/${repo}/main/products.json?cb=${Date.now()}`,
-                        `https://raw.githubusercontent.com/${repo}/master/products.json?cb=${Date.now()}`,
-                        `https://raw.githubusercontent.com/${repo}/main/data/products.json?cb=${Date.now()}`,
-                        `https://raw.githubusercontent.com/${repo}/master/data/products.json?cb=${Date.now()}`
-                    ];
+                    // 1. Fetch repository file tree recursively via GitHub API
+                    const treeRes = await fetch(`https://api.github.com/repos/${repo}/git/trees/main?recursive=1`, {
+                        headers: { Authorization: `token ${token}` }
+                    });
 
-                    for (const url of endpoints) {
-                        try {
-                            const res = await fetch(url);
-                            if (res.ok) {
-                                const data = await res.json();
-                                if (Array.isArray(data) && data.length > 0) {
-                                    items = data;
-                                    source = url;
-                                    break;
-                                } else if (data && typeof data === 'object') {
-                                    const key = Object.keys(data).find(k => Array.isArray(data[k]) && data[k].length > 0);
-                                    if (key) {
-                                        items = data[key];
-                                        source = `${url} (${key})`;
-                                        break;
+                    let treeFiles = [];
+                    if (treeRes.ok) {
+                        const treeData = await treeRes.json();
+                        treeFiles = treeData.tree || [];
+                    } else {
+                        // Fallback to master branch tree if main fails
+                        const masterRes = await fetch(`https://api.github.com/repos/${repo}/git/trees/master?recursive=1`, {
+                            headers: { Authorization: `token ${token}` }
+                        });
+                        if (masterRes.ok) {
+                            const masterData = await masterRes.json();
+                            treeFiles = masterData.tree || [];
+                        }
+                    }
+
+                    // 2. Filter for ALL .json files anywhere in the repo structure
+                    const jsonFiles = treeFiles.filter(f => f.path.toLowerCase().endsWith('.json') && !f.path.includes('package') && !f.path.includes('tsconfig'));
+
+                    // 3. If no files found in tree, check standard paths directly
+                    if (jsonFiles.length === 0) {
+                        jsonFiles.push({ path: 'products.json' }, { path: 'data/products.json' }, { path: 'catalog.json' });
+                    }
+
+                    // 4. Fetch and read EVERY JSON file found in the repository
+                    for (const file of jsonFiles) {
+                        for (const branch of ['main', 'master']) {
+                            try {
+                                const rawUrl = `https://raw.githubusercontent.com/${repo}/${branch}/${file.path}?cb=${Date.now()}`;
+                                const res = await fetch(rawUrl);
+                                if (res.ok) {
+                                    const jsonContent = await res.json();
+                                    let extracted = [];
+
+                                    if (Array.isArray(jsonContent)) {
+                                        extracted = jsonContent;
+                                    } else if (jsonContent && typeof jsonContent === 'object') {
+                                        // Look for any array inside the object (e.g., { products: [...] } or { items: [...] })
+                                        const arrayKey = Object.keys(jsonContent).find(k => Array.isArray(jsonContent[k]));
+                                        if (arrayKey) {
+                                            extracted = jsonContent[arrayKey];
+                                        }
+                                    }
+
+                                    if (extracted.length > 0) {
+                                        allDiscoveredItems.push(...extracted);
+                                        foundSources.push(`${file.path} (${extracted.length})`);
+                                        break; // Successfully loaded this file, move to next
                                     }
                                 }
-                            }
-                        } catch (e) {}
+                            } catch (e) {}
+                        }
                     }
 
-                    if (items.length === 0) {
-                        items = [
-                            { id: 'Item 001', name: 'Haute Couture Evening Gown 001', price: 299.99, imageUrl: getSvgPlaceholder('Item 001') }
+                    // Remove duplicate items based on ID
+                    const uniqueMap = new Map();
+                    allDiscoveredItems.forEach((item, idx) => {
+                        const itemId = String(item.id || item.itemNo || item.code || `Item ${idx + 1}`);
+                        if (!uniqueMap.has(itemId)) {
+                            uniqueMap.set(itemId, item);
+                        }
+                    });
+
+                    let finalItems = Array.from(uniqueMap.values());
+
+                    if (finalItems.length === 0) {
+                        finalItems = [
+                            { id: 'Item 001', name: 'Haute Couture Evening Gown 001', price: 299.99, imageUrl: getSvgPlaceholder('Item 001') },
+                            { id: 'Item 002', name: 'Haute Couture Evening Gown 002', price: 349.99, imageUrl: getSvgPlaceholder('Item 002') },
+                            { id: 'Item 003', name: 'Haute Couture Evening Gown 003', price: 399.99, imageUrl: getSvgPlaceholder('Item 003') }
                         ];
-                        source = 'Default Template (No products.json found in repo)';
+                        foundSources.push('Default Template');
                     }
 
-                    const normalized = items.map((item, idx) => {
+                    const normalized = finalItems.map((item, idx) => {
                         const itemId = String(item.id || item.itemNo || item.code || `Item ${String(idx + 1).padStart(3, '0')}`);
                         let img = item.imageUrl || item.imageSrc || item.image || item.cover || item.photo || item.picture || item.img || (Array.isArray(item.gallery) ? item.gallery[0] : null);
                         
@@ -135,11 +178,10 @@
                     });
 
                     setProducts(normalized);
-                    setStatusMsg(`Live GitHub Data [${source}] (${normalized.length} items)`);
-                    localStorage.setItem(`cache_products_${repo}`, JSON.stringify(normalized));
+                    setStatusMsg(`Loaded from [${foundSources.join(', ')}] — Total: ${normalized.length} items`);
                 } catch (e) {
                     setProducts([]);
-                    setStatusMsg('Error fetching live data');
+                    setStatusMsg('Error scanning repository files');
                 } finally {
                     setLoading(false);
                 }
@@ -163,7 +205,7 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        message: 'Update products catalog via Admin Studio',
+                        message: 'Update full catalog via Admin Studio',
                         content: btoa(unescape(encodeURIComponent(JSON.stringify(updatedList, null, 2)))),
                         sha: sha || undefined
                     })
@@ -177,8 +219,8 @@
                 setProducts(updated);
                 const success = await commitToGitHub(updated);
                 setEditingItem(null);
-                if (success) alert(`Item updated & committed straight to GitHub!`);
-                else alert(`Saved locally, but GitHub commit failed. Check token permissions.`);
+                if (success) alert(`Item updated & committed to GitHub!`);
+                else alert(`Saved locally, but GitHub commit failed.`);
             };
 
             const handleDeleteItem = async (targetId) => {
@@ -221,7 +263,7 @@
                     <header className="border-b border-neutral-800 bg-neutral-900/90 px-6 py-5 flex items-center justify-between sticky top-0 z-30 shadow-xl backdrop-blur-md">
                         <div className="flex items-center space-x-3">
                             <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-amber-600 to-rose-500 flex items-center justify-center text-white font-serif font-bold text-sm">SF</div>
-                            <h1 className="font-serif text-xl font-bold text-amber-100">Simple Fab 2.0 Admin Studio</h1>
+                            <h1 className="font-serif text-xl font-bold text-amber-100">Simple Fab 2.0 Complete Catalog</h1>
                         </div>
                         <select
                             value={selectedRepo}
@@ -235,7 +277,7 @@
                     <main className="max-w-7xl mx-auto px-4 py-12 flex-grow w-full space-y-12">
                         <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-neutral-900 p-6 rounded-3xl border border-amber-500/30">
                             <div>
-                                <h2 className="font-serif text-2xl font-bold text-amber-100">Repository Catalog ({filteredItems.length} items)</h2>
+                                <h2 className="font-serif text-2xl font-bold text-amber-100">All Repository Listings ({filteredItems.length} items)</h2>
                                 <p className="text-xs text-neutral-400 mt-1">Status: <strong className="text-emerald-400 font-mono">{statusMsg}</strong></p>
                             </div>
                             <div className="flex gap-3 w-full sm:w-auto">
@@ -243,18 +285,18 @@
                                     type="text"
                                     value={searchQuery}
                                     onChange={e => setSearchQuery(e.target.value)}
-                                    placeholder="Search items..."
+                                    placeholder="Search all items..."
                                     className="bg-neutral-950 border border-amber-500/30 rounded-xl px-4 py-2 text-xs text-white focus:outline-none"
                                 />
                                 {isAuthenticated && (
                                     <button onClick={addNewItem} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-4 py-2 rounded-xl font-semibold whitespace-nowrap">+ Add New Gown</button>
                                 )}
-                                <button onClick={() => fetchLiveRepoData(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2 rounded-xl font-semibold whitespace-nowrap">🔄 Refresh</button>
+                                <button onClick={() => deepScanAllRepoFiles(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2 rounded-xl font-semibold whitespace-nowrap">🔄 Full Scan</button>
                             </div>
                         </div>
 
                         {loading ? (
-                            <p className="text-center text-amber-400 py-16 font-mono text-sm">Loading repository catalog...</p>
+                            <p className="text-center text-amber-400 py-16 font-mono text-sm">Deep scanning all repository folders for product files...</p>
                         ) : filteredItems.length === 0 ? (
                             <div className="border border-dashed border-amber-500/40 rounded-3xl p-16 text-center bg-neutral-900/50 space-y-4">
                                 <p className="text-sm text-neutral-400">No items found in this repository.</p>
