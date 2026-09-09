@@ -60,10 +60,10 @@
 
             const [products, setProducts] = React.useState([]);
             const [orders, setOrders] = React.useState([]);
-            const [nextItemNo, setNextItemNo] = React.useState('ITM-001');
-            const [lastUploadedId, setLastUploadedId] = React.useState('None yet');
+            const [nextItemNo, setNextItemNo] = React.useState('Item 001');
+            const [lastUploadedId, setLastUploadedId] = React.useState('Scanning live website...');
             
-            const [form, setForm] = React.useState({ id: '', name: '', price: '' });
+            const [form, setForm] = React.useState({ id: 'Item 001', name: '', price: '' });
             const [primaryImageFile, setPrimaryImageFile] = React.useState(null);
             const [galleryFiles, setGalleryFiles] = React.useState([]);
             
@@ -79,16 +79,20 @@
 
             React.useEffect(() => {
                 if (isAuthenticated) {
-                    fetchRepoData(selectedRepo);
+                    scanLiveWebsiteDOM(selectedRepo);
                 }
             }, [selectedRepo, isAuthenticated]);
 
-            const fetchRepoData = async (repoName) => {
+            const scanLiveWebsiteDOM = async (repoName) => {
                 try {
+                    const rParts = repoName.split('/');
+                    const oName = rParts[0] ? rParts[0].toLowerCase() : '';
+                    const rName = rParts[1] || '';
+                    
                     let items = [];
-                    let prodRes = await fetch(`https://raw.githubusercontent.com/${repoName}/main/data/products.json?t=${Date.now()}`);
+                    let prodRes = await fetch(`https://${oName}.github.io/${rName}/data/products.json?t=${Date.now()}`);
                     if (!prodRes.ok) {
-                        prodRes = await fetch(`https://raw.githubusercontent.com/${repoName}/main/products.json?t=${Date.now()}`);
+                        prodRes = await fetch(`https://raw.githubusercontent.com/${repoName}/main/data/products.json?t=${Date.now()}`);
                     }
 
                     if (prodRes.ok) {
@@ -97,15 +101,14 @@
                         else if (rawData.products && Array.isArray(rawData.products)) items = rawData.products;
                         else if (rawData.items && Array.isArray(rawData.items)) items = rawData.items;
                         else if (rawData.catalog && Array.isArray(rawData.catalog)) items = rawData.catalog;
-                        else if (rawData && typeof rawData === 'object') {
-                            // Extract any array found in the object safely
+                        else if (typeof rawData === 'object') {
                             const foundKey = Object.keys(rawData).find(k => Array.isArray(rawData[k]));
                             if (foundKey) items = rawData[foundKey];
                         }
                     }
 
                     const normalized = items.map((item, idx) => {
-                        const itemId = item.id || item.itemNo || item.code || `ITM-${String(idx + 1).padStart(3, '0')}`;
+                        const itemId = item.id || item.itemNo || item.code || `Item ${String(idx + 1).padStart(3, '0')}`;
                         const rawGallery = item.gallery || item.images || item.pictures || [];
                         return {
                             id: itemId,
@@ -119,9 +122,9 @@
                     });
 
                     setProducts(normalized);
-                    calculateNextId(normalized);
+                    computeLastItemAndNext(normalized);
 
-                    const ordRes = await fetch(`https://raw.githubusercontent.com/${repoName}/main/data/orders.json?t=${Date.now()}`);
+                    const ordRes = await fetch(`https://${oName}.github.io/${rName}/data/orders.json?t=${Date.now()}`);
                     if (ordRes.ok) {
                         const ordData = await ordRes.json();
                         setOrders(Array.isArray(ordData) ? ordData : (ordData.orders || []));
@@ -131,35 +134,58 @@
                 } catch (err) {
                     setProducts([]);
                     setOrders([]);
-                    setLastUploadedId('None');
+                    setLastUploadedId('Item 000');
+                    setNextItemNo('Item 001');
+                    setForm(f => ({ ...f, id: 'Item 001' }));
                 }
             };
 
-            const calculateNextId = (items) => {
-                if (!items || items.length === 0) {
-                    setLastUploadedId('None yet');
-                    setNextItemNo('ITM-001');
-                    setForm(f => ({ ...f, id: 'ITM-001' }));
+            const computeLastItemAndNext = (itemsArray) => {
+                if (!itemsArray || itemsArray.length === 0) {
+                    setLastUploadedId('No items on website yet');
+                    setNextItemNo('Item 001');
+                    setForm(f => ({ ...f, id: 'Item 001' }));
                     return;
                 }
-                const lastItem = items[items.length - 1];
-                const lastIdStr = String(lastItem.itemNo || lastItem.id || 'ITM-000');
-                setLastUploadedId(lastIdStr);
 
-                const match = lastIdStr.match(/(\d+)$/);
-                if (match) {
-                    const nextNum = parseInt(match[1], 10) + 1;
-                    const padded = String(nextNum).padStart(3, '0');
-                    const prefix = lastIdStr.replace(/\d+$/, '');
-                    const newId = prefix + padded;
-                    setNextItemNo(newId);
-                    setForm(f => ({ ...f, id: newId }));
+                let maxNum = -1;
+                let detectedPrefix = 'Item ';
+                let lastFoundStr = 'Item 000';
+
+                itemsArray.forEach((item) => {
+                    const idStr = String(item.itemNo || item.id || '').trim();
+                    const match = idStr.match(/^(.*?)(\d+)$/);
+                    if (match) {
+                        const prefix = match[1];
+                        const num = parseInt(match[2], 10);
+                        if (num > maxNum) {
+                            maxNum = num;
+                            detectedPrefix = prefix;
+                            lastFoundStr = idStr;
+                        }
+                    }
+                });
+
+                setLastUploadedId(lastFoundStr);
+
+                if (maxNum >= 0) {
+                    const nextNum = maxNum + 1;
+                    const rawNumMatch = lastFoundStr.match(/\d+$/);
+                    const paddingLength = rawNumMatch ? rawNumMatch[0].length : 3;
+                    const paddedNum = String(nextNum).padStart(Math.max(3, paddingLength), '0');
+                    const suggestedId = detectedPrefix + paddedNum;
+                    
+                    setNextItemNo(suggestedId);
+                    setForm(f => ({ ...f, id: suggestedId }));
                 } else {
-                    const fallbackId = `ITM-0${items.length + 1}`;
-                    setNextItemNo(fallbackId);
-                    setForm(f => ({ ...f, id: fallbackId }));
+                    const fallback = `Item 0${itemsArray.length + 1}`;
+                    setNextItemNo(fallback);
+                    setForm(f => ({ ...f, id: fallback }));
                 }
             };
+
+            // REAL-TIME DUPLICATE CHECKER
+            const isIdDuplicate = products.some(p => String(p.id || p.itemNo).trim().toLowerCase() === String(form.id).trim().toLowerCase());
 
             const commitToGitHub = async (path, contentBytes, message, isBase64 = false) => {
                 const url = `https://api.github.com/repos/${selectedRepo}/contents/${path}`;
@@ -187,10 +213,16 @@
 
             const handleManualPublish = async (e) => {
                 e.preventDefault();
+                const cleanId = form.id.trim();
+
+                if (products.some(p => String(p.id || p.itemNo).trim().toLowerCase() === cleanId.toLowerCase())) {
+                    alert(`CONFLICT ERROR: Item ID "${cleanId}" already exists in this repository! Please use the suggested unique sequence to avoid corrupting data.`);
+                    return;
+                }
+
                 setLoading(true);
 
                 try {
-                    const cleanId = form.id.trim();
                     let finalPrimaryUrl = 'https://via.placeholder.com/400';
                     
                     if (primaryImageFile) {
@@ -199,7 +231,7 @@
                             reader.onload = async () => {
                                 const base64 = reader.result.split(',')[1];
                                 const safeName = primaryImageFile.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
-                                const fileName = `images/${cleanId}_main_${Date.now()}_${safeName}`;
+                                const fileName = `images/${cleanId.replace(/\s+/g, '_')}_main_${Date.now()}_${safeName}`;
                                 const uploaded = await commitToGitHub(fileName, base64, `Upload main image for ${cleanId}`, true);
                                 if (uploaded) resolve(`https://raw.githubusercontent.com/${selectedRepo}/main/${fileName}`);
                                 else reject('Primary image upload failed');
@@ -217,7 +249,7 @@
                                 reader.onload = async () => {
                                     const base64 = reader.result.split(',')[1];
                                     const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
-                                    const fileName = `images/${cleanId}_gallery_${i}_${Date.now()}_${safeName}`;
+                                    const fileName = `images/${cleanId.replace(/\s+/g, '_')}_gallery_${i}_${Date.now()}_${safeName}`;
                                     const uploaded = await commitToGitHub(fileName, base64, `Upload gallery image ${i+1} for ${cleanId}`, true);
                                     if (uploaded) resolve(`https://raw.githubusercontent.com/${selectedRepo}/main/${fileName}`);
                                     else resolve(null);
@@ -238,20 +270,17 @@
                         published: true
                     };
 
-                    // Filter out any potential duplicate ID entry safely to prevent duplicates
-                    const filteredExisting = products.filter(p => String(p.id || p.itemNo) !== cleanId);
-                    const updatedProducts = [...filteredExisting, newItem];
-                    
+                    const updatedProducts = [...products, newItem];
                     const success = await commitToGitHub('data/products.json', updatedProducts, `Publish item ${cleanId}: ${newItem.name}`);
 
                     if (success) {
                         setProducts(updatedProducts);
-                        calculateNextId(updatedProducts);
+                        computeLastItemAndNext(updatedProducts);
                         setForm({ id: nextItemNo, name: '', price: '' });
                         setPrimaryImageFile(null);
                         setGalleryFiles([]);
-                        alert(`Item ${cleanId} successfully saved & pinned to ${selectedRepo}!`);
-                        fetchRepoData(selectedRepo);
+                        alert(`Item ${cleanId} successfully saved & published to ${selectedRepo}!`);
+                        scanLiveWebsiteDOM(selectedRepo);
                     } else {
                         alert('Failed to publish. Check your GitHub Token permissions.');
                     }
@@ -280,7 +309,7 @@
                 const success = await commitToGitHub('data/products.json', updated, `Delete item ${targetId}`);
                 if (success) {
                     setProducts(updated);
-                    calculateNextId(updated);
+                    computeLastItemAndNext(updated);
                 }
             };
 
@@ -306,6 +335,7 @@
                 return 0;
             });
 
+            const recentReferenceItems = [...products].slice(-3).reverse();
             const totalRevenue = orders.filter(o => o.status === 'Closed').reduce((acc, c) => acc + (c.total || 0), 0);
 
             if (!isAuthenticated) {
@@ -379,12 +409,12 @@
 
                         <div className="bg-neutral-950 px-4 py-2 rounded-2xl border border-amber-500/40 flex items-center gap-3">
                             <div>
-                                <p className="text-[10px] text-neutral-400 uppercase tracking-wider">Last Uploaded ID</p>
+                                <p className="text-[10px] text-neutral-400 uppercase tracking-wider">Website Last Item</p>
                                 <p className="text-xs font-mono font-bold text-amber-300">{lastUploadedId}</p>
                             </div>
                             <div className="h-6 w-[1px] bg-neutral-800"></div>
                             <div>
-                                <p className="text-[10px] text-neutral-400 uppercase tracking-wider">Next Suggested ID</p>
+                                <p className="text-[10px] text-neutral-400 uppercase tracking-wider">Next Safe Sequence</p>
                                 <p className="text-xs font-mono font-bold text-emerald-400">{nextItemNo}</p>
                             </div>
                         </div>
@@ -413,18 +443,54 @@
                                     <div className="bg-neutral-900/95 p-6 rounded-3xl border border-amber-500/30 shadow-2xl space-y-4">
                                         <div className="flex justify-between items-center">
                                             <h2 className="font-serif text-lg font-bold text-amber-100">Add & Publish New Item</h2>
-                                            <span className="text-xs font-mono bg-neutral-950 text-amber-400 px-2.5 py-1 rounded-full border border-amber-500/30">Next: {nextItemNo}</span>
+                                            <span className="text-xs font-mono bg-emerald-950 text-emerald-300 px-2.5 py-1 rounded-full border border-emerald-500/40">Safe Next: {nextItemNo}</span>
                                         </div>
+
+                                        <div className="bg-neutral-950 p-3 rounded-2xl border border-amber-500/20 space-y-2">
+                                            <p className="text-[10px] font-semibold text-amber-300 uppercase tracking-wider">Website Listing Reference Feed:</p>
+                                            {recentReferenceItems.length === 0 ? (
+                                                <p className="text-[11px] text-neutral-500 italic">Scanning website listings...</p>
+                                            ) : (
+                                                <div className="grid grid-cols-3 gap-2">
+                                                    {recentReferenceItems.map((refItem, idx) => (
+                                                        <div key={idx} className="bg-neutral-900 border border-neutral-800 p-2 rounded-xl text-center space-y-1">
+                                                            <div className="h-14 bg-neutral-950 rounded-lg overflow-hidden flex items-center justify-center">
+                                                                <img src={refItem.imageUrl} alt={refItem.name} className="w-full h-full object-cover" />
+                                                            </div>
+                                                            <p className="text-[10px] font-mono font-bold text-amber-300 truncate">{refItem.itemNo || refItem.id}</p>
+                                                            <p className="text-[9px] text-emerald-400">${(refItem.price || 0).toFixed(2)}</p>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+
                                         <form onSubmit={handleManualPublish} className="space-y-3">
                                             <div>
-                                                <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Item Number / ID (Mirror format)</label>
+                                                <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Item ID / Number</label>
                                                 <input
                                                     type="text"
                                                     value={form.id}
                                                     onChange={e => setForm({ ...form, id: e.target.value })}
-                                                    className="w-full bg-neutral-950 border border-amber-500/30 rounded-xl px-3 py-2 text-xs text-amber-200 font-mono"
+                                                    className={`w-full bg-neutral-950 border rounded-xl px-3 py-2 text-xs font-bold font-mono tracking-wider ${
+                                                        isIdDuplicate ? 'border-rose-500 text-rose-400 bg-rose-950/20' : 'border-emerald-500/50 text-emerald-300'
+                                                    }`}
                                                     required
                                                 />
+                                                {/* CONFLICT WARNING BANNER */}
+                                                {isIdDuplicate && (
+                                                    <div className="mt-1.5 p-2 bg-rose-950/60 border border-rose-500/60 rounded-xl flex items-center justify-between text-[11px] text-rose-200">
+                                                        <span>⚠️ <strong>Conflict Warning:</strong> ID already exists!</span>
+                                                        <button 
+                                                            type="button" 
+                                                            onClick={() => setForm({ ...form, id: nextItemNo })}
+                                                            className="underline font-bold text-amber-300 hover:text-white"
+                                                        >
+                                                            Use {nextItemNo}
+                                                        </button>
+                                                    </div>
+                                                )}
+                                                <p className="text-[10px] text-neutral-400 mt-1">Must be unique to prevent override errors.</p>
                                             </div>
                                             <div>
                                                 <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Item Name</label>
@@ -468,14 +534,13 @@
                                                     onChange={e => setGalleryFiles(e.target.files)}
                                                     className="w-full text-xs text-neutral-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-cyan-600 file:text-white cursor-pointer"
                                                 />
-                                                <p className="text-[10px] text-neutral-400 mt-1">Hold Ctrl/Cmd to select multiple images for product angles.</p>
                                             </div>
                                             <button
                                                 type="submit"
-                                                disabled={loading}
-                                                className="w-full bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white font-semibold py-3 rounded-xl text-xs uppercase tracking-wider transition shadow-lg border border-amber-400/40 disabled:opacity-50"
+                                                disabled={loading || isIdDuplicate}
+                                                className="w-full bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white font-semibold py-3 rounded-xl text-xs uppercase tracking-wider transition shadow-lg border border-amber-400/40 disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
-                                                {loading ? 'Uploading Images & Publishing...' : `Publish Item (${form.id})`}
+                                                {loading ? 'Uploading Images & Publishing...' : isIdDuplicate ? '⚠️ Cannot Publish Duplicate ID' : `Publish Item (${form.id})`}
                                             </button>
                                         </form>
                                     </div>
@@ -499,15 +564,14 @@
                                                 />
                                             </div>
                                             <div className="w-full sm:w-auto text-right">
-                                                <button onClick={() => fetchRepoData(selectedRepo)} className="w-full sm:w-auto bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl transition shadow-md">
-                                                    🔄 Refresh Catalog Data
+                                                <button onClick={() => scanLiveWebsiteDOM(selectedRepo)} className="w-full sm:w-auto bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl transition shadow-md">
+                                                    🔄 Re-Scan Live Website
                                                 </button>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* SECTION 1: CATALOG MANAGEMENT EDITOR WITH SORTING */}
                                 <div className="space-y-4">
                                     <div className="flex flex-wrap justify-between items-center border-b border-neutral-800 pb-3 gap-4">
                                         <h3 className="font-serif text-xl font-bold text-amber-100">Catalog Management Editor ({filteredItems.length} items)</h3>
@@ -531,7 +595,7 @@
                                     {filteredItems.length === 0 ? (
                                         <div className="border border-dashed border-amber-500/40 rounded-3xl p-12 text-center bg-neutral-900/70 space-y-3">
                                             <h4 className="font-serif text-lg font-medium text-amber-100">No Products Found in this Repository</h4>
-                                            <p className="text-xs text-neutral-400 max-w-md mx-auto">Use the <strong className="text-amber-300">Add & Publish New Item</strong> form above to publish your first item and initialize this repository!</p>
+                                            <p className="text-xs text-neutral-400 max-w-md mx-auto">Click <strong className="text-amber-300">Re-Scan Live Website</strong> above to sync items!</p>
                                         </div>
                                     ) : (
                                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
@@ -583,7 +647,6 @@
                                     )}
                                 </div>
 
-                                {/* SECTION 2: EMBEDDED LIVE STOREFRONT WEBSITE PREVIEW */}
                                 <div className="space-y-4 pt-6 border-t border-neutral-800">
                                     <div className="flex justify-between items-center">
                                         <div>
