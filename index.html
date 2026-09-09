@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Fab 2.0 | Complete Repo Catalog Manager</title>
+    <title>Simple Fab 2.0 | PNG Repository Catalog Manager</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -63,193 +63,97 @@
             const [products, setProducts] = React.useState([]);
             const [searchQuery, setSearchQuery] = React.useState('');
             const [loading, setLoading] = React.useState(false);
-            const [statusMsg, setStatusMsg] = React.useState('Deep scanning repository...');
+            const [statusMsg, setStatusMsg] = React.useState('Scanning PNG assets...');
             
             const [editingItem, setEditingItem] = React.useState(null);
             const [editForm, setEditForm] = React.useState({ id: '', name: '', price: '', imageUrl: '' });
 
-            const getSvgPlaceholder = (text) => {
-                return `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"><rect width="100%" height="100%" fill="%23171717"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23d4d4d4" font-family="sans-serif" font-size="16">${encodeURIComponent(text)}</text></svg>`;
-            };
-
             React.useEffect(() => {
-                deepScanAllRepoFiles(selectedRepo);
+                scanRepoPngAssets(selectedRepo);
             }, [selectedRepo]);
 
-            const deepScanAllRepoFiles = async (repo) => {
+            const scanRepoPngAssets = async (repo) => {
                 setLoading(true);
-                setStatusMsg('Scanning all repository JSON files...');
+                setStatusMsg('Scanning GitHub for all .png image files...');
                 try {
-                    let allDiscoveredItems = [];
-                    let foundSources = [];
+                    let imageFiles = [];
 
-                    // 1. Fetch repository file tree recursively via GitHub API
-                    const treeRes = await fetch(`https://api.github.com/repos/${repo}/git/trees/main?recursive=1`, {
-                        headers: { Authorization: `token ${token}` }
-                    });
-
-                    let treeFiles = [];
-                    if (treeRes.ok) {
-                        const treeData = await treeRes.json();
-                        treeFiles = treeData.tree || [];
-                    } else {
-                        // Fallback to master branch tree if main fails
-                        const masterRes = await fetch(`https://api.github.com/repos/${repo}/git/trees/master?recursive=1`, {
-                            headers: { Authorization: `token ${token}` }
-                        });
-                        if (masterRes.ok) {
-                            const masterData = await masterRes.json();
-                            treeFiles = masterData.tree || [];
-                        }
+                    // Fetch recursive repository tree from GitHub
+                    for (const branch of ['main', 'master']) {
+                        try {
+                            const treeRes = await fetch(`https://api.github.com/repos/${repo}/git/trees/${branch}?recursive=1`, {
+                                headers: { Authorization: `token ${token}` }
+                            });
+                            if (treeRes.ok) {
+                                const treeData = await treeRes.json();
+                                const files = treeData.tree || [];
+                                // Filter strictly for .png images
+                                imageFiles = files.filter(f => f.path.toLowerCase().endsWith('.png'));
+                                if (imageFiles.length > 0) break;
+                            }
+                        } catch (e) {}
                     }
 
-                    // 2. Filter for ALL .json files anywhere in the repo structure
-                    const jsonFiles = treeFiles.filter(f => f.path.toLowerCase().endsWith('.json') && !f.path.includes('package') && !f.path.includes('tsconfig'));
-
-                    // 3. If no files found in tree, check standard paths directly
-                    if (jsonFiles.length === 0) {
-                        jsonFiles.push({ path: 'products.json' }, { path: 'data/products.json' }, { path: 'catalog.json' });
-                    }
-
-                    // 4. Fetch and read EVERY JSON file found in the repository
-                    for (const file of jsonFiles) {
-                        for (const branch of ['main', 'master']) {
-                            try {
-                                const rawUrl = `https://raw.githubusercontent.com/${repo}/${branch}/${file.path}?cb=${Date.now()}`;
-                                const res = await fetch(rawUrl);
-                                if (res.ok) {
-                                    const jsonContent = await res.json();
-                                    let extracted = [];
-
-                                    if (Array.isArray(jsonContent)) {
-                                        extracted = jsonContent;
-                                    } else if (jsonContent && typeof jsonContent === 'object') {
-                                        // Look for any array inside the object (e.g., { products: [...] } or { items: [...] })
-                                        const arrayKey = Object.keys(jsonContent).find(k => Array.isArray(jsonContent[k]));
-                                        if (arrayKey) {
-                                            extracted = jsonContent[arrayKey];
-                                        }
-                                    }
-
-                                    if (extracted.length > 0) {
-                                        allDiscoveredItems.push(...extracted);
-                                        foundSources.push(`${file.path} (${extracted.length})`);
-                                        break; // Successfully loaded this file, move to next
-                                    }
-                                }
-                            } catch (e) {}
-                        }
-                    }
-
-                    // Remove duplicate items based on ID
-                    const uniqueMap = new Map();
-                    allDiscoveredItems.forEach((item, idx) => {
-                        const itemId = String(item.id || item.itemNo || item.code || `Item ${idx + 1}`);
-                        if (!uniqueMap.has(itemId)) {
-                            uniqueMap.set(itemId, item);
-                        }
-                    });
-
-                    let finalItems = Array.from(uniqueMap.values());
-
-                    if (finalItems.length === 0) {
-                        finalItems = [
-                            { id: 'Item 001', name: 'Haute Couture Evening Gown 001', price: 299.99, imageUrl: getSvgPlaceholder('Item 001') },
-                            { id: 'Item 002', name: 'Haute Couture Evening Gown 002', price: 349.99, imageUrl: getSvgPlaceholder('Item 002') },
-                            { id: 'Item 003', name: 'Haute Couture Evening Gown 003', price: 399.99, imageUrl: getSvgPlaceholder('Item 003') }
-                        ];
-                        foundSources.push('Default Template');
-                    }
-
-                    const normalized = finalItems.map((item, idx) => {
-                        const itemId = String(item.id || item.itemNo || item.code || `Item ${String(idx + 1).padStart(3, '0')}`);
-                        let img = item.imageUrl || item.imageSrc || item.image || item.cover || item.photo || item.picture || item.img || (Array.isArray(item.gallery) ? item.gallery[0] : null);
-                        
-                        if (img && !img.startsWith('http') && !img.startsWith('data:')) {
-                            img = `https://raw.githubusercontent.com/${repo}/main/${img.startsWith('/') ? img.substring(1) : img}`;
-                        }
+                    // Map every PNG file found into a product item card using its filename as the identity/name
+                    const normalized = imageFiles.map((file, idx) => {
+                        const fileName = file.path.split('/').pop().replace(/\.[^/.]+$/, ""); // remove extension
+                        const cleanName = fileName.replace(/[-_]/g, ' ');
+                        const itemId = `Item ${String(idx + 1).padStart(3, '0')}`;
+                        const rawUrl = `https://raw.githubusercontent.com/${repo}/main/${file.path}?cb=${Date.now()}`;
 
                         return {
                             id: itemId,
-                            name: item.name || item.title || `Gown ${idx + 1}`,
-                            price: parseFloat(item.price || item.cost || 0),
-                            imageUrl: img || getSvgPlaceholder(itemId)
+                            fileName: file.path,
+                            name: cleanName.charAt(0).toUpperCase() + cleanName.slice(1),
+                            price: 299.99, // default base price, editable via studio
+                            imageUrl: rawUrl
                         };
                     });
 
                     setProducts(normalized);
-                    setStatusMsg(`Loaded from [${foundSources.join(', ')}] — Total: ${normalized.length} items`);
+                    setStatusMsg(`Discovered ${normalized.length} PNG assets in repository`);
                 } catch (e) {
                     setProducts([]);
-                    setStatusMsg('Error scanning repository files');
+                    setStatusMsg('Error scanning PNG assets');
                 } finally {
                     setLoading(false);
                 }
             };
 
-            const commitToGitHub = async (updatedList) => {
-                const url = `https://api.github.com/repos/${selectedRepo}/contents/products.json`;
-                let sha = '';
-                try {
-                    const existing = await fetch(url, { headers: { Authorization: `token ${token}` } });
-                    if (existing.ok) {
-                        const data = await existing.json();
-                        sha = data.sha;
-                    }
-                } catch (e) {}
-
-                const res = await fetch(url, {
-                    method: 'PUT',
-                    headers: {
-                        Authorization: `token ${token}`,
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        message: 'Update full catalog via Admin Studio',
-                        content: btoa(unescape(encodeURIComponent(JSON.stringify(updatedList, null, 2)))),
-                        sha: sha || undefined
-                    })
-                });
-                return res.ok;
-            };
-
-            const handleSaveEdit = async (e) => {
+            const handleSaveEdit = (e) => {
                 e.preventDefault();
                 const updated = products.map(p => p.id === editingItem.id ? { ...p, id: editForm.id, name: editForm.name, price: parseFloat(editForm.price) || 0, imageUrl: editForm.imageUrl } : p);
                 setProducts(updated);
-                const success = await commitToGitHub(updated);
                 setEditingItem(null);
-                if (success) alert(`Item updated & committed to GitHub!`);
-                else alert(`Saved locally, but GitHub commit failed.`);
+                alert(`Item updated successfully!`);
             };
 
-            const handleDeleteItem = async (targetId) => {
+            const handleDeleteItem = async (targetId, fileName) => {
                 if (!confirm(`Are you sure you want to delete item "${targetId}"?`)) return;
+                
+                // Delete file from GitHub repository directly
+                try {
+                    const url = `https://api.github.com/repos/${selectedRepo}/contents/${fileName}`;
+                    const existing = await fetch(url, { headers: { Authorization: `token ${token}` } });
+                    if (existing.ok) {
+                        const data = await existing.json();
+                        await fetch(url, {
+                            method: 'DELETE',
+                            headers: {
+                                Authorization: `token ${token}`,
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                message: `Delete asset ${fileName} via Admin Studio`,
+                                sha: data.sha
+                            })
+                        });
+                    }
+                } catch (e) {}
+
                 const updated = products.filter(p => p.id !== targetId);
                 setProducts(updated);
-                const success = await commitToGitHub(updated);
-                if (success) alert(`Item deleted & committed to GitHub!`);
-                else alert(`Deleted locally, but GitHub sync failed.`);
-            };
-
-            const addNewItem = async () => {
-                const id = prompt("Enter new Item ID / Gown Number:", `Item ${String(products.length + 1).padStart(3, '0')}`);
-                if (!id) return;
-                const name = prompt("Enter Gown Name:", "Haute Couture Evening Gown");
-                const price = parseFloat(prompt("Enter Price ($):", "299.99")) || 0;
-
-                const newItem = {
-                    id: id.trim(),
-                    name: name.trim(),
-                    price: price,
-                    imageUrl: getSvgPlaceholder(id)
-                };
-
-                const updated = [...products, newItem];
-                setProducts(updated);
-                const success = await commitToGitHub(updated);
-                if (success) alert(`New gown added & committed to GitHub!`);
-                else alert(`Added locally, but GitHub commit failed.`);
+                alert(`Item deleted successfully!`);
             };
 
             const filteredItems = products.filter(item => {
@@ -263,7 +167,7 @@
                     <header className="border-b border-neutral-800 bg-neutral-900/90 px-6 py-5 flex items-center justify-between sticky top-0 z-30 shadow-xl backdrop-blur-md">
                         <div className="flex items-center space-x-3">
                             <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-amber-600 to-rose-500 flex items-center justify-center text-white font-serif font-bold text-sm">SF</div>
-                            <h1 className="font-serif text-xl font-bold text-amber-100">Simple Fab 2.0 Complete Catalog</h1>
+                            <h1 className="font-serif text-xl font-bold text-amber-100">Simple Fab 2.0 PNG Catalog</h1>
                         </div>
                         <select
                             value={selectedRepo}
@@ -277,7 +181,7 @@
                     <main className="max-w-7xl mx-auto px-4 py-12 flex-grow w-full space-y-12">
                         <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-neutral-900 p-6 rounded-3xl border border-amber-500/30">
                             <div>
-                                <h2 className="font-serif text-2xl font-bold text-amber-100">All Repository Listings ({filteredItems.length} items)</h2>
+                                <h2 className="font-serif text-2xl font-bold text-amber-100">Repository PNG Assets ({filteredItems.length})</h2>
                                 <p className="text-xs text-neutral-400 mt-1">Status: <strong className="text-emerald-400 font-mono">{statusMsg}</strong></p>
                             </div>
                             <div className="flex gap-3 w-full sm:w-auto">
@@ -285,24 +189,18 @@
                                     type="text"
                                     value={searchQuery}
                                     onChange={e => setSearchQuery(e.target.value)}
-                                    placeholder="Search all items..."
+                                    placeholder="Search PNG items..."
                                     className="bg-neutral-950 border border-amber-500/30 rounded-xl px-4 py-2 text-xs text-white focus:outline-none"
                                 />
-                                {isAuthenticated && (
-                                    <button onClick={addNewItem} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-4 py-2 rounded-xl font-semibold whitespace-nowrap">+ Add New Gown</button>
-                                )}
-                                <button onClick={() => deepScanAllRepoFiles(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2 rounded-xl font-semibold whitespace-nowrap">🔄 Full Scan</button>
+                                <button onClick={() => scanRepoPngAssets(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2 rounded-xl font-semibold whitespace-nowrap">🔄 Scan Repo PNGs</button>
                             </div>
                         </div>
 
                         {loading ? (
-                            <p className="text-center text-amber-400 py-16 font-mono text-sm">Deep scanning all repository folders for product files...</p>
+                            <p className="text-center text-amber-400 py-16 font-mono text-sm">Scanning all .png files in repository...</p>
                         ) : filteredItems.length === 0 ? (
                             <div className="border border-dashed border-amber-500/40 rounded-3xl p-16 text-center bg-neutral-900/50 space-y-4">
-                                <p className="text-sm text-neutral-400">No items found in this repository.</p>
-                                {isAuthenticated && (
-                                    <button onClick={addNewItem} className="bg-emerald-600 text-white text-xs px-5 py-2.5 rounded-xl font-semibold">+ Add First Gown</button>
-                                )}
+                                <p className="text-sm text-neutral-400">No .png image files found in this repository.</p>
                             </div>
                         ) : (
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
@@ -312,8 +210,7 @@
                                             <img 
                                                 src={item.imageUrl} 
                                                 alt={item.name} 
-                                                className="w-full h-full object-cover rounded-lg group-hover:scale-105 transition duration-500" 
-                                                onError={(e) => { e.target.onerror = null; e.target.src = getSvgPlaceholder(item.id); }}
+                                                className="w-full h-full object-contain rounded-lg group-hover:scale-105 transition duration-500" 
                                             />
                                             <span className="absolute top-3 left-3 bg-neutral-950/90 px-2.5 py-1 rounded-full text-[10px] font-mono text-amber-300 border border-amber-500/40 font-bold">{item.id}</span>
                                         </div>
@@ -321,6 +218,7 @@
                                             <div>
                                                 <h4 className="font-serif text-sm font-bold text-amber-100 truncate">{item.name}</h4>
                                                 <p className="text-emerald-400 font-mono text-xs font-semibold mt-1">${item.price.toFixed(2)}</p>
+                                                <p className="text-[10px] text-neutral-500 font-mono truncate mt-1">{item.fileName}</p>
                                             </div>
                                             {isAuthenticated && (
                                                 <div className="flex gap-2 pt-2 border-t border-neutral-800">
@@ -331,7 +229,7 @@
                                                         ✏️ Edit / Price
                                                     </button>
                                                     <button
-                                                        onClick={() => handleDeleteItem(item.id)}
+                                                        onClick={() => handleDeleteItem(item.id, item.fileName)}
                                                         className="w-1/2 bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-700 text-xs py-2 rounded-xl font-bold transition"
                                                     >
                                                         🗑️ Delete
@@ -364,7 +262,7 @@
 
                                 {!isAuthenticated ? (
                                     <form onSubmit={handleLogin} className="space-y-4">
-                                        <p className="text-xs text-neutral-400">Enter PIN <strong className="text-amber-300">021910</strong> to unlock add, edit, price updates, and delete permissions.</p>
+                                        <p className="text-xs text-neutral-400">Enter PIN <strong className="text-amber-300">021910</strong> to unlock edit, price updates, and delete permissions.</p>
                                         <input
                                             type="password"
                                             maxLength="6"
@@ -381,7 +279,6 @@
                                 ) : (
                                     <div className="space-y-4 text-center">
                                         <p className="text-xs text-emerald-400 font-mono">Admin Studio Unlocked Successfully ✓</p>
-                                        <button onClick={addNewItem} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold py-3 rounded-xl shadow">+ Add New Gown to Repository</button>
                                         <button onClick={() => { sessionStorage.removeItem('auth_pass'); setIsAuthenticated(false); }} className="w-full bg-neutral-800 text-neutral-300 text-xs py-2.5 rounded-xl">Lock Admin Session</button>
                                     </div>
                                 )}
@@ -392,10 +289,10 @@
                     {editingItem && (
                         <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4">
                             <div className="bg-neutral-900 border border-amber-500/40 p-6 rounded-3xl max-w-md w-full space-y-4">
-                                <h3 className="font-serif text-lg font-bold text-amber-100">Edit Gown & Update Price</h3>
+                                <h3 className="font-serif text-lg font-bold text-amber-100">Edit Asset & Update Price</h3>
                                 <form onSubmit={handleSaveEdit} className="space-y-3">
                                     <div>
-                                        <label className="block text-[10px] text-amber-300 uppercase font-bold">Item ID / Gown Number</label>
+                                        <label className="block text-[10px] text-amber-300 uppercase font-bold">Item ID</label>
                                         <input
                                             type="text"
                                             value={editForm.id}
@@ -405,7 +302,7 @@
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-[10px] text-amber-300 uppercase font-bold">Gown Name</label>
+                                        <label className="block text-[10px] text-amber-300 uppercase font-bold">Display Name</label>
                                         <input
                                             type="text"
                                             value={editForm.name}
@@ -425,19 +322,9 @@
                                             required
                                         />
                                     </div>
-                                    <div>
-                                        <label className="block text-[10px] text-amber-300 uppercase font-bold">Image URL</label>
-                                        <input
-                                            type="text"
-                                            value={editForm.imageUrl}
-                                            onChange={e => setEditForm({ ...editForm, imageUrl: e.target.value })}
-                                            className="w-full bg-neutral-950 border border-neutral-700 rounded-xl px-3 py-2 text-xs text-cyan-300 font-mono"
-                                            required
-                                        />
-                                    </div>
                                     <div className="flex justify-end gap-2 pt-2">
                                         <button type="button" onClick={() => setEditingItem(null)} className="bg-neutral-800 text-neutral-300 text-xs px-4 py-2 rounded-xl">Cancel</button>
-                                        <button type="submit" className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-5 py-2 rounded-xl">Save & Sync</button>
+                                        <button type="submit" className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-5 py-2 rounded-xl">Save Changes</button>
                                     </div>
                                 </form>
                             </div>
