@@ -73,6 +73,10 @@
             const repoName = repoParts[1] || '';
             const liveWebsiteUrl = `https://${orgName}.github.io/${repoName}/`;
 
+            const getSvgPlaceholder = (text) => {
+                return `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"><rect width="100%" height="100%" fill="%23171717"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23d4d4d4" font-family="sans-serif" font-size="16">${encodeURIComponent(text)}</text></svg>`;
+            };
+
             React.useEffect(() => {
                 if (isAuthenticated) {
                     scanWebsiteData(selectedRepo);
@@ -125,21 +129,25 @@
 
                     if (items.length === 0) {
                         items = [
-                            { id: 'Item 001', itemNo: 'Item 001', name: 'Haute Couture Evening Gown 001', price: 299.99, imageUrl: 'https://via.placeholder.com/400?text=Item+001', gallery: [] },
-                            { id: 'Item 002', itemNo: 'Item 002', name: 'Haute Couture Evening Gown 002', price: 349.99, imageUrl: 'https://via.placeholder.com/400?text=Item+002', gallery: [] },
-                            { id: 'Item 003', itemNo: 'Item 003', name: 'Haute Couture Evening Gown 003', price: 399.99, imageUrl: 'https://via.placeholder.com/400?text=Item+003', gallery: [] }
+                            { id: 'Item 001', itemNo: 'Item 001', name: 'Haute Couture Evening Gown 001', price: 299.99, image: getSvgPlaceholder('Item 001') },
+                            { id: 'Item 002', itemNo: 'Item 002', name: 'Haute Couture Evening Gown 002', price: 349.99, image: getSvgPlaceholder('Item 002') },
+                            { id: 'Item 003', itemNo: 'Item 003', name: 'Haute Couture Evening Gown 003', price: 399.99, image: getSvgPlaceholder('Item 003') }
                         ];
                     }
 
                     const normalized = items.map((item, idx) => {
                         const itemId = item.id || item.itemNo || item.code || `Item ${String(idx + 1).padStart(3, '0')}`;
                         const rawGallery = item.gallery || item.images || item.pictures || [];
+                        
+                        // Robust multi-property image extractor
+                        const extractedImage = item.imageUrl || item.imageSrc || item.image || item.cover || item.photo || item.picture || item.img || item.thumbnail || item.url || (Array.isArray(rawGallery) ? rawGallery[0] : null) || getSvgPlaceholder(itemId);
+
                         return {
                             id: itemId,
                             itemNo: itemId,
                             name: item.name || item.title || `Item ${idx + 1}`,
                             price: parseFloat(item.price || item.cost || 0),
-                            imageUrl: item.imageUrl || item.imageSrc || item.image || (Array.isArray(rawGallery) ? rawGallery[0] : null) || `https://via.placeholder.com/400?text=Item+${idx + 1}`,
+                            imageUrl: extractedImage,
                             gallery: Array.isArray(rawGallery) ? rawGallery : [],
                             published: true
                         };
@@ -150,7 +158,7 @@
                     detectCustomNamingAndAudit(normalized);
                 } catch (err) {
                     const fallbackItems = [
-                        { id: 'Item 001', itemNo: 'Item 001', name: 'Haute Couture Evening Gown 001', price: 299.99, imageUrl: 'https://via.placeholder.com/400', gallery: [] }
+                        { id: 'Item 001', itemNo: 'Item 001', name: 'Haute Couture Evening Gown 001', price: 299.99, imageUrl: getSvgPlaceholder('Item 001'), gallery: [] }
                     ];
                     setProducts(fallbackItems);
                     detectCustomNamingAndAudit(fallbackItems);
@@ -264,18 +272,18 @@
                 setLoading(true);
 
                 try {
-                    let finalPrimaryUrl = 'https://via.placeholder.com/400';
+                    let finalPrimaryUrl = getSvgPlaceholder(cleanId);
                     
                     if (primaryImageFile) {
                         const reader = new FileReader();
-                        finalPrimaryUrl = await new Promise((resolve, reject) => {
+                        finalPrimaryUrl = await new Promise((resolve) => {
                             reader.onload = async () => {
                                 const base64 = reader.result.split(',')[1];
                                 const safeName = primaryImageFile.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
                                 const fileName = `images/${cleanId.replace(/\s+/g, '_')}_main_${Date.now()}_${safeName}`;
                                 const uploaded = await commitToGitHub(fileName, base64, `Upload main image for ${cleanId}`, true);
                                 if (uploaded) resolve(`https://raw.githubusercontent.com/${selectedRepo}/main/${fileName}`);
-                                else resolve(`https://via.placeholder.com/400?text=${encodeURIComponent(cleanId)}`);
+                                else resolve(getSvgPlaceholder(cleanId));
                             };
                             reader.readAsDataURL(primaryImageFile);
                         });
@@ -287,6 +295,7 @@
                         name: form.name.trim(),
                         price: parseFloat(form.price) || 0,
                         imageUrl: finalPrimaryUrl,
+                        image: finalPrimaryUrl,
                         gallery: [],
                         published: true
                     };
@@ -524,7 +533,7 @@
                             </div>
                         </div>
 
-                        {/* LIVE WEBSITE PREVIEW CONTAINER WITH EMBEDDED EDIT & DELETE CONTROLS */}
+                        {/* LIVE WEBSITE PREVIEW GRID */}
                         <div className="space-y-6 pt-6 border-t border-neutral-800">
                             <div className="flex justify-between items-center">
                                 <div>
@@ -547,7 +556,12 @@
                                         return (
                                             <div key={itemId} className="bg-neutral-900 border-2 border-amber-500/60 rounded-2xl overflow-hidden shadow-2xl flex flex-col justify-between">
                                                 <div className="h-48 overflow-hidden bg-neutral-950 relative flex items-center justify-center p-2">
-                                                    <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover rounded-lg" />
+                                                    <img 
+                                                        src={item.imageUrl} 
+                                                        alt={item.name} 
+                                                        className="w-full h-full object-cover rounded-lg" 
+                                                        onError={(e) => { e.target.onerror = null; e.target.src = getSvgPlaceholder(itemId); }}
+                                                    />
                                                 </div>
                                                 <div className="p-4 space-y-3 bg-neutral-900 flex-grow flex flex-col justify-between">
                                                     <div className="space-y-2">
