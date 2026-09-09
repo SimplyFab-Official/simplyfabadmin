@@ -59,14 +59,8 @@
             ];
 
             const [products, setProducts] = React.useState([]);
-            const [nextItemNo, setNextItemNo] = React.useState('Item 001');
-            const [lastUploadedId, setLastUploadedId] = React.useState('Scanning website...');
-            const [missingSlots, setMissingSlots] = React.useState([]);
-            
-            const [form, setForm] = React.useState({ id: 'Item 001', name: '', price: '' });
-            const [primaryImageFile, setPrimaryImageFile] = React.useState(null);
-            const [loading, setLoading] = React.useState(false);
             const [searchQuery, setSearchQuery] = React.useState('');
+            const [loading, setLoading] = React.useState(false);
 
             const repoParts = selectedRepo.split('/');
             const orgName = repoParts[0] ? repoParts[0].toLowerCase() : '';
@@ -79,177 +73,79 @@
 
             React.useEffect(() => {
                 if (isAuthenticated) {
-                    scanWebsiteData(selectedRepo);
+                    loadRepositoryData(selectedRepo);
                 }
             }, [selectedRepo, isAuthenticated]);
 
-            const scanWebsiteData = async (repoName) => {
+            const loadRepositoryData = async (repo) => {
                 setLoading(true);
                 try {
                     let items = [];
-                    
-                    // 1. Try GitHub Contents API with authentication token (bypasses 404 & CORS completely)
-                    const apiEndpoints = [
-                        `https://api.github.com/repos/${repoName}/contents/products.json`,
-                        `https://api.github.com/repos/${repoName}/contents/data/products.json`
+                    const candidatePaths = [
+                        'products.json',
+                        'data/products.json',
+                        'catalog.json',
+                        'data/catalog.json',
+                        'src/products.json'
                     ];
 
-                    let rawData = null;
-                    for (const endpoint of apiEndpoints) {
+                    for (const path of candidatePaths) {
                         try {
-                            const res = await fetch(endpoint, {
+                            const apiUrl = `https://api.github.com/repos/${repo}/contents/${path}`;
+                            const res = await fetch(apiUrl, {
                                 headers: { Authorization: `token ${token}` }
                             });
                             if (res.ok) {
                                 const fileData = await res.json();
                                 if (fileData && fileData.content) {
                                     const decoded = JSON.parse(atob(fileData.content.replace(/\n/g, '')));
-                                    rawData = decoded;
-                                    break;
+                                    if (Array.isArray(decoded)) {
+                                        items = decoded;
+                                        break;
+                                    } else if (decoded && typeof decoded === 'object') {
+                                        const foundKey = Object.keys(decoded).find(k => Array.isArray(decoded[k]));
+                                        if (foundKey) {
+                                            items = decoded[foundKey];
+                                            break;
+                                        }
+                                    }
                                 }
                             }
                         } catch (e) {}
                     }
 
-                    // 2. Fallback to direct raw content URLs if API is restricted
-                    if (!rawData) {
-                        const rawEndpoints = [
-                            `https://raw.githubusercontent.com/${repoName}/main/products.json?t=${Date.now()}`,
-                            `https://raw.githubusercontent.com/${repoName}/master/products.json?t=${Date.now()}`,
-                            `https://raw.githubusercontent.com/${repoName}/main/data/products.json?t=${Date.now()}`
-                        ];
-                        for (const url of rawEndpoints) {
-                            try {
-                                const res = await fetch(url);
-                                if (res.ok) {
-                                    rawData = await res.json();
-                                    if (rawData) break;
-                                }
-                            } catch (e) {}
-                        }
-                    }
-
-                    // 3. Fallback to localStorage cache
-                    if (!rawData) {
-                        const localSaved = localStorage.getItem(`cache_products_${repoName}`);
-                        if (localSaved) rawData = JSON.parse(localSaved);
-                    }
-
-                    if (rawData) {
-                        if (Array.isArray(rawData)) items = rawData;
-                        else if (rawData.products && Array.isArray(rawData.products)) items = rawData.products;
-                        else if (rawData.items && Array.isArray(rawData.items)) items = rawData.items;
-                        else if (rawData.catalog && Array.isArray(rawData.catalog)) items = rawData.catalog;
-                        else if (typeof rawData === 'object') {
-                            const foundKey = Object.keys(rawData).find(k => Array.isArray(rawData[k]));
-                            if (foundKey) items = rawData[foundKey];
-                        }
-                    }
-
                     if (items.length === 0) {
-                        items = [
-                            { id: 'Item 001', itemNo: 'Item 001', name: 'Haute Couture Evening Gown 001', price: 299.99, image: getSvgPlaceholder('Item 001') },
-                            { id: 'Item 002', itemNo: 'Item 002', name: 'Haute Couture Evening Gown 002', price: 349.99, image: getSvgPlaceholder('Item 002') },
-                            { id: 'Item 003', itemNo: 'Item 003', name: 'Haute Couture Evening Gown 003', price: 399.99, image: getSvgPlaceholder('Item 003') }
-                        ];
+                        const cached = localStorage.getItem(`cache_products_${repo}`);
+                        if (cached) items = JSON.parse(cached);
                     }
 
                     const normalized = items.map((item, idx) => {
                         const itemId = item.id || item.itemNo || item.code || `Item ${String(idx + 1).padStart(3, '0')}`;
-                        const rawGallery = item.gallery || item.images || item.pictures || [];
+                        let img = item.imageUrl || item.imageSrc || item.image || item.cover || item.photo || item.picture || item.img || item.thumbnail || item.url || (Array.isArray(item.gallery) ? item.gallery[0] : null);
                         
-                        let imgUrl = item.imageUrl || item.imageSrc || item.image || item.cover || item.photo || item.picture || item.img || item.thumbnail || item.url || (Array.isArray(rawGallery) ? rawGallery[0] : null);
-
-                        if (imgUrl && !imgUrl.startsWith('http') && !imgUrl.startsWith('data:')) {
-                            imgUrl = `https://raw.githubusercontent.com/${repoName}/main/${imgUrl.startsWith('/') ? imgUrl.substring(1) : imgUrl}`;
+                        if (img && !img.startsWith('http') && !img.startsWith('data:')) {
+                            img = `https://raw.githubusercontent.com/${repo}/main/${img.startsWith('/') ? img.substring(1) : img}`;
                         }
 
                         return {
-                            id: itemId,
-                            itemNo: itemId,
-                            name: item.name || item.title || `Item ${idx + 1}`,
+                            id: String(itemId),
+                            name: item.name || item.title || `Gown ${idx + 1}`,
                             price: parseFloat(item.price || item.cost || 0),
-                            imageUrl: imgUrl || getSvgPlaceholder(itemId),
-                            gallery: Array.isArray(rawGallery) ? rawGallery : [],
-                            published: true
+                            imageUrl: img || getSvgPlaceholder(itemId)
                         };
                     });
 
                     setProducts(normalized);
-                    localStorage.setItem(`cache_products_${repoName}`, JSON.stringify(normalized));
-                    detectCustomNamingAndAudit(normalized);
-                } catch (err) {
+                    localStorage.setItem(`cache_products_${repo}`, JSON.stringify(normalized));
+                } catch (e) {
                     setProducts([]);
                 } finally {
                     setLoading(false);
                 }
             };
 
-            const detectCustomNamingAndAudit = (itemsArray) => {
-                if (!itemsArray || itemsArray.length === 0) {
-                    setLastUploadedId('No items on website yet');
-                    setNextItemNo('Item 001');
-                    setMissingSlots([]);
-                    setForm(f => ({ ...f, id: 'Item 001' }));
-                    return;
-                }
-
-                let maxNum = -1;
-                let detectedPrefix = 'Item ';
-                let lastFoundStr = 'Item 000';
-                let foundNumbers = [];
-
-                itemsArray.forEach((item) => {
-                    const idStr = String(item.itemNo || item.id || '').trim();
-                    const match = idStr.match(/^(.*?)(\d+)$/);
-                    if (match) {
-                        const prefix = match[1];
-                        const num = parseInt(match[2], 10);
-                        foundNumbers.push(num);
-                        if (num > maxNum) {
-                            maxNum = num;
-                            detectedPrefix = prefix;
-                            lastFoundStr = idStr;
-                        }
-                    }
-                });
-
-                let missing = [];
-                if (maxNum > 0) {
-                    for (let i = 1; i <= maxNum; i++) {
-                        if (!foundNumbers.includes(i)) {
-                            const paddedMissingNum = String(i).padStart(3, '0');
-                            missing.push(detectedPrefix + paddedMissingNum);
-                        }
-                    }
-                }
-                setMissingSlots(missing);
-                setLastUploadedId(lastFoundStr);
-
-                if (maxNum >= 0) {
-                    if (missing.length > 0) {
-                        setNextItemNo(missing[0]);
-                        setForm(f => ({ ...f, id: missing[0] }));
-                    } else {
-                        const nextNum = maxNum + 1;
-                        const rawNumMatch = lastFoundStr.match(/\d+$/);
-                        const paddingLength = rawNumMatch ? rawNumMatch[0].length : 3;
-                        const paddedNum = String(nextNum).padStart(Math.max(3, paddingLength), '0');
-                        const suggestedId = detectedPrefix + paddedNum;
-                        setNextItemNo(suggestedId);
-                        setForm(f => ({ ...f, id: suggestedId }));
-                    }
-                } else {
-                    const fallback = `Item 0${itemsArray.length + 1}`;
-                    setNextItemNo(fallback);
-                    setForm(f => ({ ...f, id: fallback }));
-                }
-            };
-
-            const isIdDuplicate = products.some(p => String(p.id || p.itemNo).trim().toLowerCase() === String(form.id).trim().toLowerCase());
-
-            const commitToGitHub = async (path, contentBytes, message, isBase64 = false) => {
-                const url = `https://api.github.com/repos/${selectedRepo}/contents/${path}`;
+            const commitToGitHub = async (updatedList) => {
+                const url = `https://api.github.com/repos/${selectedRepo}/contents/products.json`;
                 let sha = '';
                 try {
                     const existing = await fetch(url, { headers: { Authorization: `token ${token}` } });
@@ -259,157 +155,90 @@
                     }
                 } catch (e) {}
 
-                try {
-                    const response = await fetch(url, {
-                        method: 'PUT',
-                        headers: {
-                            Authorization: `token ${token}`,
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            message: message,
-                            content: isBase64 ? contentBytes : btoa(unescape(encodeURIComponent(JSON.stringify(contentBytes, null, 2)))),
-                            sha: sha || undefined
-                        })
-                    });
-                    return response.ok;
-                } catch (err) {
-                    return false;
-                }
-            };
-
-            const handleManualPublish = async (e) => {
-                e.preventDefault();
-                const cleanId = form.id.trim();
-
-                if (products.some(p => String(p.id || p.itemNo).trim().toLowerCase() === cleanId.toLowerCase())) {
-                    alert(`CONFLICT ERROR: Item ID "${cleanId}" already exists! Please use a unique sequence.`);
-                    return;
-                }
-
-                setLoading(true);
-
-                try {
-                    let finalPrimaryUrl = getSvgPlaceholder(cleanId);
-                    
-                    if (primaryImageFile) {
-                        const reader = new FileReader();
-                        finalPrimaryUrl = await new Promise((resolve) => {
-                            reader.onload = async () => {
-                                const base64 = reader.result.split(',')[1];
-                                const safeName = primaryImageFile.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
-                                const fileName = `images/${cleanId.replace(/\s+/g, '_')}_main_${Date.now()}_${safeName}`;
-                                const uploaded = await commitToGitHub(fileName, base64, `Upload main image for ${cleanId}`, true);
-                                if (uploaded) resolve(`https://raw.githubusercontent.com/${selectedRepo}/main/${fileName}`);
-                                else resolve(getSvgPlaceholder(cleanId));
-                            };
-                            reader.readAsDataURL(primaryImageFile);
-                        });
-                    }
-
-                    const newItem = {
-                        id: cleanId,
-                        itemNo: cleanId,
-                        name: form.name.trim(),
-                        price: parseFloat(form.price) || 0,
-                        imageUrl: finalPrimaryUrl,
-                        image: finalPrimaryUrl,
-                        gallery: [],
-                        published: true
-                    };
-
-                    const updatedProducts = [...products, newItem];
-                    setProducts(updatedProducts);
-                    localStorage.setItem(`cache_products_${selectedRepo}`, JSON.stringify(updatedProducts));
-                    detectCustomNamingAndAudit(updatedProducts);
-
-                    await commitToGitHub('products.json', updatedProducts, `Publish item ${cleanId}: ${newItem.name}`);
-
-                    setForm({ id: nextItemNo, name: '', price: '' });
-                    setPrimaryImageFile(null);
-                    alert(`Item ${cleanId} successfully saved & published!`);
-                } catch (err) {
-                    alert('Error: ' + err);
-                } finally {
-                    setLoading(false);
-                }
+                await fetch(url, {
+                    method: 'PUT',
+                    headers: {
+                        Authorization: `token ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: 'Update products via Admin Studio',
+                        content: btoa(unescape(encodeURIComponent(JSON.stringify(updatedList, null, 2)))),
+                        sha: sha || undefined
+                    })
+                });
             };
 
             const updateItemField = async (targetId, fieldName, newValue) => {
                 const updated = products.map(p => {
-                    const currentId = p.id || p.itemNo;
-                    if (currentId === targetId) {
+                    if (p.id === targetId) {
                         return { 
                             ...p, 
                             [fieldName]: fieldName === 'price' ? (parseFloat(newValue) || 0) : newValue,
-                            ...(fieldName === 'id' ? { itemNo: newValue, id: newValue } : {})
+                            ...(fieldName === 'id' ? { id: newValue } : {})
                         };
                     }
                     return p;
                 });
                 setProducts(updated);
                 localStorage.setItem(`cache_products_${selectedRepo}`, JSON.stringify(updated));
-                detectCustomNamingAndAudit(updated);
-
-                await commitToGitHub('products.json', updated, `Update ${fieldName} for item ${targetId}`);
+                await commitToGitHub(updated);
             };
 
             const deleteItem = async (targetId) => {
-                if (!confirm(`Are you sure you want to permanently delete item "${targetId}"?`)) return;
-                
-                setLoading(true);
-                try {
-                    const updated = products.filter(p => String(p.id || p.itemNo).trim() !== String(targetId).trim());
-                    setProducts(updated);
-                    localStorage.setItem(`cache_products_${selectedRepo}`, JSON.stringify(updated));
-                    detectCustomNamingAndAudit(updated);
+                if (!confirm(`Permanently delete item "${targetId}"?`)) return;
+                const updated = products.filter(p => p.id !== targetId);
+                setProducts(updated);
+                localStorage.setItem(`cache_products_${selectedRepo}`, JSON.stringify(updated));
+                await commitToGitHub(updated);
+                alert(`Item "${targetId}" deleted successfully!`);
+            };
 
-                    await commitToGitHub('products.json', updated, `Delete website item ${targetId}`);
-                    alert(`Item "${targetId}" successfully deleted!`);
-                } catch (err) {
-                    alert('Error deleting item: ' + err);
-                } finally {
-                    setLoading(false);
-                }
+            const addNewItem = async () => {
+                const id = prompt("Enter new Item ID / Gown Number:", `Item ${String(products.length + 1).padStart(3, '0')}`);
+                if (!id) return;
+                const name = prompt("Enter Gown Name:", "Haute Couture Evening Gown");
+                const price = parseFloat(prompt("Enter Price ($):", "299.99")) || 0;
+
+                const newItem = {
+                    id: id.trim(),
+                    name: name.trim(),
+                    price: price,
+                    imageUrl: getSvgPlaceholder(id)
+                };
+
+                const updated = [...products, newItem];
+                setProducts(updated);
+                localStorage.setItem(`cache_products_${selectedRepo}`, JSON.stringify(updated));
+                await commitToGitHub(updated);
+                alert(`Item ${id} added successfully!`);
             };
 
             const filteredItems = products.filter(item => {
                 if (!searchQuery) return true;
                 let q = searchQuery.toLowerCase();
-                return (item.name && item.name.toLowerCase().includes(q)) || 
-                       (item.itemNo && item.itemNo.toLowerCase().includes(q)) || 
-                       (item.id && String(item.id).toLowerCase().includes(q));
+                return item.name.toLowerCase().includes(q) || item.id.toLowerCase().includes(q);
             });
 
             if (!isAuthenticated) {
                 return (
                     <div className="flex flex-col items-center justify-center min-h-screen bg-neutral-950 px-4">
                         <div className="w-full max-w-md bg-neutral-900 border border-amber-500/30 p-8 rounded-3xl shadow-2xl space-y-6 text-center">
-                            <div className="w-14 h-14 mx-auto rounded-full bg-gradient-to-tr from-amber-600 via-rose-500 to-amber-400 flex items-center justify-center text-white font-serif font-bold text-xl shadow-md border-2 border-amber-300/60">SF</div>
-                            <div>
-                                <h1 className="font-serif text-2xl font-bold text-amber-100">Admin Authorization</h1>
-                                <p className="text-xs text-neutral-400 mt-1">Enter PIN code <strong className="text-amber-300">021910</strong> to access.</p>
-                            </div>
+                            <div className="w-14 h-14 mx-auto rounded-full bg-gradient-to-tr from-amber-600 to-rose-500 flex items-center justify-center text-white font-serif font-bold text-xl">SF</div>
+                            <h1 className="font-serif text-2xl font-bold text-amber-100">Admin Authorization</h1>
                             <form onSubmit={handleLogin} className="space-y-4">
                                 <input
                                     type="password"
                                     maxLength="6"
-                                    placeholder="Enter Admin PIN"
+                                    placeholder="Enter PIN"
                                     value={passInput}
                                     onChange={e => { setPassInput(e.target.value); setPassError(false); }}
-                                    className="w-full bg-neutral-950 border border-amber-500/40 rounded-xl px-4 py-3 text-center text-lg tracking-widest text-amber-300 font-mono focus:outline-none focus:border-amber-400 shadow-inner"
+                                    className="w-full bg-neutral-950 border border-amber-500/40 rounded-xl px-4 py-3 text-center text-lg tracking-widest text-amber-300 font-mono focus:outline-none"
                                     autoFocus
                                     required
                                 />
-                                {passError && (
-                                    <p className="text-xs text-rose-400 font-medium">Incorrect PIN code. Please try again.</p>
-                                )}
-                                <button
-                                    type="submit"
-                                    className="w-full bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white font-semibold py-3.5 rounded-xl text-xs uppercase tracking-wider transition shadow-lg border border-amber-400/40"
-                                >
-                                    Unlock Admin Studio
-                                </button>
+                                {passError && <p className="text-xs text-rose-400">Incorrect PIN.</p>}
+                                <button type="submit" className="w-full bg-gradient-to-r from-amber-600 to-rose-600 text-white font-semibold py-3.5 rounded-xl text-xs uppercase tracking-wider">Unlock Studio</button>
                             </form>
                         </div>
                     </div>
@@ -418,220 +247,113 @@
 
             return (
                 <div className="flex flex-col min-h-screen bg-neutral-900 text-neutral-100">
-                    <div className="bg-gradient-to-r from-amber-600 via-rose-600 to-amber-600 border-b border-amber-500/30 text-white text-xs py-2 px-4 text-center font-medium tracking-widest uppercase overflow-hidden whitespace-nowrap shadow-sm">
-                        <div className="animate-marquee">
-                            EXQUISITE HANDCRAFTED HAUTE COUTURE &bull; ALL REPOSITORIES ADMIN & SYNC HUB &bull; SECURE ACCESS ENABLED
-                        </div>
-                    </div>
-
-                    <header className="border-b border-neutral-800 bg-neutral-900/95 backdrop-blur-md sticky top-0 z-40 px-6 py-4 flex flex-wrap items-center justify-between gap-4 shadow-xl">
+                    <header className="border-b border-neutral-800 bg-neutral-950 px-6 py-4 flex flex-wrap items-center justify-between gap-4 shadow-xl">
                         <div className="flex items-center space-x-3">
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-amber-600 via-rose-500 to-amber-400 flex items-center justify-center text-white font-serif font-bold text-sm shadow-md border-2 border-amber-300/60">SF</div>
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-amber-600 to-rose-500 flex items-center justify-center text-white font-serif font-bold text-sm">SF</div>
                             <div>
-                                <h1 className="font-serif text-lg font-bold tracking-wide text-amber-100">Simple Fab Master Studio</h1>
-                                <div className="flex items-center gap-2 mt-0.5">
-                                    <select
-                                        value={selectedRepo}
-                                        onChange={(e) => setSelectedRepo(e.target.value)}
-                                        className="bg-neutral-950 border border-amber-500/40 text-[11px] px-2.5 py-1 rounded text-amber-300 font-mono focus:outline-none"
-                                    >
-                                        {repositories.map(r => <option key={r} value={r}>{r}</option>)}
-                                    </select>
-                                    <a 
-                                        href={liveWebsiteUrl} 
-                                        target="_blank" 
-                                        rel="noopener noreferrer"
-                                        className="text-[11px] text-cyan-400 underline hover:text-cyan-300 font-mono truncate max-w-[200px]"
-                                    >
-                                        🔗 {liveWebsiteUrl}
-                                    </a>
-                                </div>
+                                <h1 className="font-serif text-lg font-bold text-amber-100">Simple Fab Master Studio</h1>
+                                <select
+                                    value={selectedRepo}
+                                    onChange={(e) => setSelectedRepo(e.target.value)}
+                                    className="bg-neutral-900 border border-amber-500/40 text-[11px] px-2.5 py-1 rounded text-amber-300 font-mono focus:outline-none mt-1"
+                                >
+                                    {repositories.map(r => <option key={r} value={r}>{r}</option>)}
+                                </select>
                             </div>
                         </div>
-
-                        <div className="flex items-center space-x-2">
-                            <span className="text-xs text-emerald-400 font-mono bg-neutral-950 px-3 py-2 rounded-xl border border-neutral-800 shadow-inner">Token Auto-Synced ✓</span>
-                            <button
-                                onClick={() => { sessionStorage.removeItem('auth_pass'); setIsAuthenticated(false); }}
-                                className="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs px-3 py-2 rounded-xl transition border border-neutral-700"
-                            >
-                                Lock
-                            </button>
+                        <div className="flex items-center gap-3">
+                            <a href={liveWebsiteUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-cyan-400 underline font-mono bg-neutral-950 px-3 py-2 rounded-xl border border-neutral-800">Visit Live Site ↗</a>
+                            <button onClick={addNewItem} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-md">+ Add Gown</button>
+                            <button onClick={() => { sessionStorage.removeItem('auth_pass'); setIsAuthenticated(false); }} className="bg-neutral-800 text-neutral-300 text-xs px-3 py-2 rounded-xl">Lock</button>
                         </div>
                     </header>
 
-                    <main className="max-w-7xl mx-auto px-4 py-10 flex-grow w-full z-10 space-y-12">
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                            <div className="bg-neutral-900/95 p-6 rounded-3xl border border-amber-500/30 shadow-2xl space-y-4">
-                                <div className="flex justify-between items-center">
-                                    <h2 className="font-serif text-lg font-bold text-amber-100">Add & Publish New Item</h2>
-                                    <span className="text-xs font-mono bg-emerald-950 text-emerald-300 px-2.5 py-1 rounded-full border border-emerald-500/40">Target: {nextItemNo}</span>
-                                </div>
-
-                                {missingSlots.length > 0 && (
-                                    <div className="bg-amber-950/40 border border-amber-500/50 p-3 rounded-2xl space-y-1">
-                                        <p className="text-[10px] font-semibold text-amber-300 uppercase tracking-wider">⚠️ Catalog Health Notice (Empty Slots Found):</p>
-                                        <p className="text-[11px] text-neutral-300">Missing item numbers detected: <strong className="text-amber-200 font-mono">{missingSlots.join(', ')}</strong>. Form pre-filled to fill the first empty slot!</p>
-                                    </div>
-                                )}
-
-                                <form onSubmit={handleManualPublish} className="space-y-3">
-                                    <div>
-                                        <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Item ID / Gown Number</label>
-                                        <input
-                                            type="text"
-                                            value={form.id}
-                                            onChange={e => setForm({ ...form, id: e.target.value })}
-                                            className={`w-full bg-neutral-950 border rounded-xl px-3 py-2 text-xs font-bold font-mono tracking-wider ${
-                                                isIdDuplicate ? 'border-rose-500 text-rose-400 bg-rose-950/20' : 'border-emerald-500/50 text-emerald-300'
-                                            }`}
-                                            required
-                                        />
-                                        {isIdDuplicate && (
-                                            <p className="text-[10px] text-rose-400 mt-1 font-semibold">⚠️ ID already exists!</p>
-                                        )}
-                                    </div>
-                                    <div>
-                                        <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Item Name</label>
-                                        <input
-                                            type="text"
-                                            placeholder="e.g. Haute Couture Evening Gown"
-                                            value={form.name}
-                                            onChange={e => setForm({ ...form, name: e.target.value })}
-                                            className="w-full bg-neutral-950 border border-amber-500/30 rounded-xl px-3 py-2 text-xs text-neutral-100"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Price ($)</label>
-                                        <input
-                                            type="number"
-                                            step="0.01"
-                                            placeholder="0.00"
-                                            value={form.price}
-                                            onChange={e => setForm({ ...form, price: e.target.value })}
-                                            className="w-full bg-neutral-950 border border-amber-500/30 rounded-xl px-3 py-2 text-xs text-neutral-100"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Cover Picture</label>
-                                        <input
-                                            type="file"
-                                            accept="image/*"
-                                            onChange={e => setPrimaryImageFile(e.target.files[0])}
-                                            className="w-full text-xs text-neutral-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-amber-600 file:text-white cursor-pointer"
-                                        />
-                                    </div>
-                                    <button
-                                        type="submit"
-                                        disabled={loading || isIdDuplicate}
-                                        className="w-full bg-gradient-to-r from-amber-600 to-rose-600 text-white font-semibold py-3 rounded-xl text-xs uppercase tracking-wider transition shadow-lg border border-amber-400/40 disabled:opacity-50"
-                                    >
-                                        {loading ? 'Publishing...' : `Publish Item (${form.id})`}
-                                    </button>
-                                </form>
-                            </div>
-
-                            <div className="lg:col-span-2 bg-neutral-900/95 p-6 rounded-3xl border border-amber-500/30 shadow-2xl space-y-4 flex flex-col justify-between">
-                                <div>
-                                    <h2 className="font-serif text-xl font-bold text-amber-100">Live Website Preview & Direct Studio Editor</h2>
-                                    <p className="text-xs text-neutral-400 mt-1">Every item shown below mirrors your repository data via GitHub API, equipped with direct inline edit and delete controls.</p>
-                                </div>
-                                <input
-                                    type="text"
-                                    value={searchQuery}
-                                    onChange={e => setSearchQuery(e.target.value)}
-                                    placeholder="Search catalog items..."
-                                    className="w-full bg-neutral-950 border border-amber-500/30 rounded-xl px-4 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-amber-400"
-                                />
-                                <button onClick={() => scanWebsiteData(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl transition shadow-md w-fit">
-                                    🔄 Refresh & Re-Scan Data
-                                </button>
-                            </div>
+                    <main className="max-w-7xl mx-auto px-4 py-10 flex-grow w-full space-y-8">
+                        <div className="bg-neutral-950 p-6 rounded-3xl border border-amber-500/30 flex flex-col sm:flex-row gap-4 items-center justify-between">
+                            <input
+                                type="text"
+                                value={searchQuery}
+                                onChange={e => setSearchQuery(e.target.value)}
+                                placeholder="Search current items..."
+                                className="w-full bg-neutral-900 border border-amber-500/30 rounded-xl px-4 py-2.5 text-sm text-neutral-100 focus:outline-none"
+                            />
+                            <button onClick={() => loadRepositoryData(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl whitespace-nowrap">
+                                🔄 Refresh Repo Data
+                            </button>
                         </div>
 
-                        {/* LIVE WEBSITE PREVIEW GRID */}
-                        <div className="space-y-6 pt-6 border-t border-neutral-800">
-                            <div className="flex justify-between items-center">
-                                <div>
-                                    <h3 className="font-serif text-2xl font-bold text-amber-100">Live Website Preview Grid ({filteredItems.length} items)</h3>
-                                    <p className="text-xs text-neutral-300 mt-0.5">Edit any Gown ID, Name, or Price directly on these cards to update your live website instantly.</p>
-                                </div>
-                                <a href={liveWebsiteUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-cyan-400 underline font-mono bg-neutral-950 px-3 py-1.5 rounded-xl border border-neutral-800">
-                                    Open Live Page ↗
-                                </a>
-                            </div>
+                        <div className="space-y-6">
+                            <h3 className="font-serif text-2xl font-bold text-amber-100 border-b border-neutral-800 pb-3">All Repository Items ({filteredItems.length})</h3>
 
-                            {filteredItems.length === 0 ? (
-                                <div className="border border-dashed border-amber-500/40 rounded-3xl p-12 text-center bg-neutral-900/70">
-                                    <p className="text-sm text-neutral-400">No items found in this repository.</p>
+                            {loading ? (
+                                <p className="text-center text-amber-400 py-12">Scanning repository folders...</p>
+                            ) : filteredItems.length === 0 ? (
+                                <div className="border border-dashed border-amber-500/40 rounded-3xl p-12 text-center bg-neutral-950 space-y-3">
+                                    <p className="text-sm text-neutral-400">No items found automatically in this repository.</p>
+                                    <button onClick={addNewItem} className="bg-amber-600 text-white text-xs px-4 py-2 rounded-xl font-semibold">Add Your First Item</button>
                                 </div>
                             ) : (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 bg-neutral-950 p-6 rounded-3xl border-2 border-amber-500/40 shadow-2xl">
-                                    {filteredItems.map((item, index) => {
-                                        const itemId = item.id || item.itemNo || `item-${index}`;
-                                        return (
-                                            <div key={itemId} className="bg-neutral-900 border-2 border-amber-500/60 rounded-2xl overflow-hidden shadow-2xl flex flex-col justify-between">
-                                                <div className="h-48 overflow-hidden bg-neutral-950 relative flex items-center justify-center p-2">
-                                                    <img 
-                                                        src={item.imageUrl} 
-                                                        alt={item.name} 
-                                                        className="w-full h-full object-cover rounded-lg" 
-                                                        onError={(e) => { e.target.onerror = null; e.target.src = getSvgPlaceholder(itemId); }}
-                                                    />
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                                    {filteredItems.map((item) => (
+                                        <div key={item.id} className="bg-neutral-950 border-2 border-amber-500/60 rounded-2xl overflow-hidden shadow-2xl flex flex-col justify-between">
+                                            <div className="h-48 overflow-hidden bg-neutral-900 relative flex items-center justify-center p-2">
+                                                <img 
+                                                    src={item.imageUrl} 
+                                                    alt={item.name} 
+                                                    className="w-full h-full object-cover rounded-lg" 
+                                                    onError={(e) => { e.target.onerror = null; e.target.src = getSvgPlaceholder(item.id); }}
+                                                />
+                                            </div>
+                                            <div className="p-4 space-y-3 bg-neutral-900 flex-grow flex flex-col justify-between">
+                                                <div className="space-y-2">
+                                                    <div>
+                                                        <label className="block text-[9px] text-amber-300 font-bold uppercase">Gown ID / Number</label>
+                                                        <input
+                                                            type="text"
+                                                            defaultValue={item.id}
+                                                            onBlur={(e) => updateItemField(item.id, 'id', e.target.value)}
+                                                            className="w-full bg-neutral-950 border border-amber-500/60 rounded-lg px-2.5 py-1.5 text-xs text-amber-300 font-mono font-bold focus:outline-none"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[9px] text-amber-300 font-bold uppercase">Gown Name</label>
+                                                        <input
+                                                            type="text"
+                                                            defaultValue={item.name}
+                                                            onBlur={(e) => updateItemField(item.id, 'name', e.target.value)}
+                                                            className="w-full bg-neutral-950 border border-amber-500/60 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none font-serif"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[9px] text-emerald-400 font-bold uppercase">Price ($)</label>
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            defaultValue={item.price}
+                                                            onBlur={(e) => updateItemField(item.id, 'price', e.target.value)}
+                                                            className="w-full bg-neutral-950 border border-emerald-500/60 rounded-lg px-2.5 py-1.5 text-xs text-emerald-300 font-mono font-bold focus:outline-none"
+                                                        />
+                                                    </div>
                                                 </div>
-                                                <div className="p-4 space-y-3 bg-neutral-900 flex-grow flex flex-col justify-between">
-                                                    <div className="space-y-2">
-                                                        <div>
-                                                            <label className="block text-[9px] text-amber-300 font-bold uppercase tracking-wider">Edit Gown / Item ID</label>
-                                                            <input
-                                                                type="text"
-                                                                defaultValue={item.itemNo || item.id}
-                                                                onBlur={(e) => updateItemField(itemId, 'id', e.target.value)}
-                                                                className="w-full bg-neutral-950 border border-amber-500/60 rounded-lg px-2.5 py-1.5 text-xs text-amber-300 font-mono font-bold focus:outline-none focus:border-white shadow-inner"
-                                                            />
-                                                        </div>
-                                                        <div>
-                                                            <label className="block text-[9px] text-amber-300 font-bold uppercase tracking-wider">Edit Gown Name</label>
-                                                            <input
-                                                                type="text"
-                                                                defaultValue={item.name}
-                                                                onBlur={(e) => updateItemField(itemId, 'name', e.target.value)}
-                                                                className="w-full bg-neutral-950 border border-amber-500/60 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-white font-serif shadow-inner"
-                                                            />
-                                                        </div>
-                                                        <div>
-                                                            <label className="block text-[9px] text-emerald-400 font-bold uppercase tracking-wider">Edit Price ($)</label>
-                                                            <input
-                                                                type="number"
-                                                                step="0.01"
-                                                                defaultValue={item.price}
-                                                                onBlur={(e) => updateItemField(itemId, 'price', e.target.value)}
-                                                                className="w-full bg-neutral-950 border border-emerald-500/60 rounded-lg px-2.5 py-1.5 text-xs text-emerald-300 font-mono font-bold focus:outline-none focus:border-white shadow-inner"
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                    <div className="pt-3 border-t border-neutral-800">
-                                                        <button
-                                                            onClick={() => deleteItem(itemId)}
-                                                            className="w-full bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-600 text-xs py-2.5 rounded-xl font-bold transition cursor-pointer shadow-lg flex items-center justify-center gap-1.5"
-                                                        >
-                                                            🗑️ Delete from Website
-                                                        </button>
-                                                    </div>
+                                                <div className="pt-3 border-t border-neutral-800">
+                                                    <button
+                                                        onClick={() => deleteItem(item.id)}
+                                                        className="w-full bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-600 text-xs py-2.5 rounded-xl font-bold transition cursor-pointer shadow-lg flex items-center justify-center gap-1.5"
+                                                    >
+                                                        🗑️ Delete from Website
+                                                    </button>
                                                 </div>
                                             </div>
-                                        );
-                                    })}
+                                        </div>
+                                    ))}
                                 </div>
                             )}
                         </div>
                     </main>
 
-                    <footer className="border-t border-neutral-800 bg-neutral-900/90 py-8 text-center text-xs text-neutral-400 z-10 space-y-1 mt-12">
-                        <p className="font-serif font-semibold text-amber-200 tracking-wide text-sm">Simple Fab 2.0 Central Admin Studio</p>
-                        <p>&copy; 2026 All rights reserved. &bull; Developed by Jeff O.</p>
+                    <footer className="border-t border-neutral-800 bg-neutral-950 py-6 text-center text-xs text-neutral-400 mt-12">
+                        <p className="font-serif text-amber-200 text-sm">Simple Fab 2.0 Central Admin Studio</p>
+                        <p>&copy; 2026 Developed by Jeff O.</p>
                     </footer>
                 </div>
             );
