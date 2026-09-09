@@ -204,6 +204,7 @@
                         setForm({ id: nextItemNo, name: '', price: '', imagePath: '' });
                         setImageFile(null);
                         alert(`Item ${newItem.id} published successfully to ${selectedRepo}!`);
+                        fetchRepoData(selectedRepo);
                     } else {
                         alert('Failed to publish. Check your GitHub Token permissions.');
                     }
@@ -324,7 +325,7 @@
                         </div>
 
                         <div className="flex bg-neutral-950 p-1 rounded-xl border border-neutral-800 text-xs font-semibold">
-                            <button onClick={() => setActiveTab('store-view')} className={`px-4 py-2 rounded-lg transition ${activeTab === 'store-view' ? 'bg-amber-600 text-white' : 'text-neutral-400 hover:text-white'}`}>Website View & Publisher ({products.length})</button>
+                            <button onClick={() => setActiveTab('store-view')} className={`px-4 py-2 rounded-lg transition ${activeTab === 'store-view' ? 'bg-amber-600 text-white' : 'text-neutral-400 hover:text-white'}`}>Management & Live View ({products.length})</button>
                             <button onClick={() => setActiveTab('finances')} className={`px-4 py-2 rounded-lg transition ${activeTab === 'finances' ? 'bg-amber-600 text-white' : 'text-neutral-400 hover:text-white'}`}>Financial Tracking ({orders.length})</button>
                         </div>
 
@@ -340,9 +341,9 @@
                         </div>
                     </header>
 
-                    <main className="max-w-7xl mx-auto px-4 py-10 flex-grow w-full z-10">
+                    <main className="max-w-7xl mx-auto px-4 py-10 flex-grow w-full z-10 space-y-12">
                         {activeTab === 'store-view' && (
-                            <div className="space-y-10">
+                            <div className="space-y-12">
                                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                                     <div className="bg-neutral-900/95 p-6 rounded-3xl border border-amber-500/30 shadow-2xl space-y-4">
                                         <div className="flex justify-between items-center">
@@ -421,24 +422,25 @@
                                                 />
                                             </div>
                                             <div className="w-full sm:w-auto text-right">
-                                                <a href={liveWebsiteUrl} target="_blank" rel="noopener noreferrer" className="inline-block bg-amber-600/30 border border-amber-500/50 hover:bg-amber-600/50 text-amber-200 text-xs font-medium px-4 py-2.5 rounded-xl transition">
-                                                    Visit Live Store ↗
-                                                </a>
+                                                <button onClick={() => fetchRepoData(selectedRepo)} className="w-full sm:w-auto bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl transition shadow-md">
+                                                    🔄 Refresh Catalog Data
+                                                </button>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
 
+                                {/* SECTION 1: ADMIN BACKEND EDIT & DELETE CARDS */}
                                 <div className="space-y-4">
                                     <div className="flex justify-between items-center border-b border-neutral-800 pb-3">
-                                        <h3 className="font-serif text-xl font-bold text-amber-100">Catalog Items ({filteredItems.length})</h3>
-                                        <span className="text-xs text-emerald-400 font-mono">● Ready for Management</span>
+                                        <h3 className="font-serif text-xl font-bold text-amber-100">Catalog Management Editor ({filteredItems.length} items)</h3>
+                                        <span className="text-xs text-amber-400 font-mono">Edit prices or delete items below</span>
                                     </div>
 
                                     {filteredItems.length === 0 ? (
                                         <div className="border border-dashed border-amber-500/40 rounded-3xl p-12 text-center bg-neutral-900/70 space-y-3">
-                                            <h4 className="font-serif text-lg font-medium text-amber-100">No Products Catalog Found in this Repository</h4>
-                                            <p className="text-xs text-neutral-400 max-w-md mx-auto">This repository does not have a <code className="text-amber-300">data/products.json</code> file yet. Use the <strong className="text-amber-300">Add & Publish New Item</strong> form on the left to publish your first item and initialize this repository!</p>
+                                            <h4 className="font-serif text-lg font-medium text-amber-100">No Products Found in this Repository</h4>
+                                            <p className="text-xs text-neutral-400 max-w-md mx-auto">Use the <strong className="text-amber-300">Add & Publish New Item</strong> form above to publish your first item and initialize this repository!</p>
                                         </div>
                                     ) : (
                                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
@@ -465,6 +467,7 @@
                                                                         className="w-24 bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1 text-xs text-amber-300 font-mono focus:outline-none focus:border-amber-400"
                                                                         title="Click to edit price and click away to save"
                                                                     />
+                                                                    <span className="text-[10px] text-neutral-500">(Auto-saves)</span>
                                                                 </div>
                                                             </div>
                                                             <div className="pt-2 border-t border-neutral-800 flex gap-2">
@@ -481,6 +484,28 @@
                                             })}
                                         </div>
                                     )}
+                                </div>
+
+                                {/* SECTION 2: EMBEDDED LIVE STOREFRONT WEBSITE PREVIEW */}
+                                <div className="space-y-4 pt-6 border-t border-neutral-800">
+                                    <div className="flex justify-between items-center">
+                                        <div>
+                                            <h3 className="font-serif text-xl font-bold text-amber-100">Live Website Preview ({selectedRepo})</h3>
+                                            <p className="text-xs text-neutral-400 mt-0.5">This live storefront view updates automatically when you toggle repositories or publish new items.</p>
+                                        </div>
+                                        <a href={liveWebsiteUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-cyan-400 underline hover:text-cyan-300 font-mono bg-neutral-950 px-3 py-1.5 rounded-xl border border-neutral-800">
+                                            Open in New Tab ↗
+                                        </a>
+                                    </div>
+                                    <div className="w-full h-[650px] rounded-3xl overflow-hidden border-2 border-amber-500/30 bg-neutral-950 shadow-2xl relative">
+                                        <iframe 
+                                            key={selectedRepo} 
+                                            src={liveWebsiteUrl} 
+                                            title="Live Website Preview" 
+                                            className="w-full h-full border-0 bg-neutral-950"
+                                            onError={() => console.log('Iframe load notice')}
+                                        />
+                                    </div>
                                 </div>
                             </div>
                         )}
