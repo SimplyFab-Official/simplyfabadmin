@@ -72,42 +72,68 @@
             };
 
             React.useEffect(() => {
-                discoverAndFetchRepo(selectedRepo);
+                fetchAllRepoItems(selectedRepo);
             }, [selectedRepo]);
 
-            const discoverAndFetchRepo = async (repo) => {
+            const fetchAllRepoItems = async (repo) => {
                 setLoading(true);
                 setLoadedSource('Scanning repository files...');
                 try {
                     let items = [];
                     let sourceName = '';
 
-                    // Fetch full repository tree to locate any JSON file containing products
-                    const treeRes = await fetch(`https://api.github.com/repos/${repo}/git/trees/main?recursive=1`, {
+                    // 1. Try fetching repository contents list directly from GitHub API
+                    const contentsRes = await fetch(`https://api.github.com/repos/${repo}/contents`, {
                         headers: { Authorization: `token ${token}` }
                     });
 
-                    if (treeRes.ok) {
-                        const treeData = await treeRes.json();
-                        const jsonFiles = treeData.tree.filter(f => f.path.endsWith('.json') && !f.path.includes('package') && !f.path.includes('order'));
+                    if (contentsRes.ok) {
+                        const rootFiles = await contentsRes.json();
+                        const jsonFiles = rootFiles.filter(f => f.name.endsWith('.json') && !f.name.includes('package') && !f.name.includes('order'));
 
-                        for (const file of jsonFiles) {
-                            const fileRes = await fetch(`https://raw.githubusercontent.com/${repo}/main/${file.path}?t=${Date.now()}`);
+                        for (const jFile of jsonFiles) {
+                            const fileRes = await fetch(jFile.download_url + `?t=${Date.now()}`);
                             if (fileRes.ok) {
-                                const jsonContent = await fileRes.json();
-                                if (Array.isArray(jsonContent) && jsonContent.length > 0) {
-                                    items = jsonContent;
-                                    sourceName = file.path;
+                                const content = await fileRes.json();
+                                if (Array.isArray(content) && content.length > 0) {
+                                    items = content;
+                                    sourceName = jFile.name;
                                     break;
-                                } else if (jsonContent && typeof jsonContent === 'object') {
-                                    const key = Object.keys(jsonContent).find(k => Array.isArray(jsonContent[k]) && jsonContent[k].length > 0);
+                                } else if (content && typeof content === 'object') {
+                                    const key = Object.keys(content).find(k => Array.isArray(content[k]) && content[k].length > 0);
                                     if (key) {
-                                        items = jsonContent[key];
-                                        sourceName = `${file.path} (${key})`;
+                                        items = content[key];
+                                        sourceName = `${jFile.name} (${key})`;
                                         break;
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    // 2. If root scan didn't find items, check standard branch trees (main and master)
+                    if (items.length === 0) {
+                        for (const branch of ['main', 'master']) {
+                            try {
+                                const treeRes = await fetch(`https://api.github.com/repos/${repo}/git/trees/${branch}?recursive=1`, {
+                                    headers: { Authorization: `token ${token}` }
+                                });
+                                if (treeRes.ok) {
+                                    const treeData = await treeRes.json();
+                                    const targetFile = treeData.tree.find(f => f.path.endsWith('products.json') || f.path.endsWith('catalog.json'));
+                                    if (targetFile) {
+                                        const rawRes = await fetch(`https://raw.githubusercontent.com/${repo}/${branch}/${targetFile.path}?t=${Date.now()}`);
+                                        if (rawRes.ok) {
+                                            const jsonContent = await rawRes.json();
+                                            if (Array.isArray(jsonContent) && jsonContent.length > 0) {
+                                                items = jsonContent;
+                                                sourceName = `${branch}/${targetFile.path}`;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (e) {}
                         }
                     }
 
@@ -143,11 +169,11 @@
                     });
 
                     setProducts(normalized);
-                    setLoadedSource(`Loaded from [${sourceName}]`);
+                    setLoadedSource(`Loaded from [${sourceName}] (${normalized.length} items)`);
                     localStorage.setItem(`cache_products_${repo}`, JSON.stringify(normalized));
                 } catch (e) {
                     setProducts([]);
-                    setLoadedSource('Error scanning repo');
+                    setLoadedSource('Error fetching repo items');
                 } finally {
                     setLoading(false);
                 }
@@ -164,7 +190,7 @@
                     }
                 } catch (e) {}
 
-                await fetch(url, {
+                const res = await fetch(url, {
                     method: 'PUT',
                     headers: {
                         Authorization: `token ${token}`,
@@ -176,6 +202,7 @@
                         sha: sha || undefined
                     })
                 });
+                return res.ok;
             };
 
             const handleSaveEdit = async (e) => {
@@ -183,9 +210,10 @@
                 const updated = products.map(p => p.id === editingItem.id ? { ...p, id: editForm.id, name: editForm.name, price: parseFloat(editForm.price) || 0, imageUrl: editForm.imageUrl } : p);
                 setProducts(updated);
                 localStorage.setItem(`cache_products_${selectedRepo}`, JSON.stringify(updated));
-                await commitToGitHub(updated);
+                const success = await commitToGitHub(updated);
                 setEditingItem(null);
-                alert(`Item updated successfully!`);
+                if (success) alert(`Item updated and synced to GitHub successfully!`);
+                else alert(`Saved locally, but GitHub sync failed. Check token permissions.`);
             };
 
             const handleDeleteItem = async (targetId) => {
@@ -213,8 +241,9 @@
                 const updated = [...products, newItem];
                 setProducts(updated);
                 localStorage.setItem(`cache_products_${selectedRepo}`, JSON.stringify(updated));
-                await commitToGitHub(updated);
-                alert(`Item ${id} added successfully!`);
+                const success = await commitToGitHub(updated);
+                if (success) alert(`Gown ${id} added and synced to GitHub successfully!`);
+                else alert(`Added locally, but GitHub sync failed. Please check your token write permissions.`);
             };
 
             const filteredItems = products.filter(item => {
@@ -261,16 +290,21 @@
                                     placeholder="Search items..."
                                     className="bg-neutral-950 border border-amber-500/30 rounded-xl px-4 py-2 text-xs text-white focus:outline-none"
                                 />
+                                {isAuthenticated && (
+                                    <button onClick={addNewItem} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-4 py-2 rounded-xl font-semibold whitespace-nowrap">+ Add New Gown</button>
+                                )}
                                 <button onClick={() => discoverAndFetchRepo(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2 rounded-xl font-semibold whitespace-nowrap">🔄 Refresh</button>
                             </div>
                         </div>
 
                         {loading ? (
-                            <p className="text-center text-amber-400 py-16 font-mono text-sm">Auto-discovering repository catalog files from GitHub...</p>
+                            <p className="text-center text-amber-400 py-16 font-mono text-sm">Scanning all branches and files from GitHub...</p>
                         ) : filteredItems.length === 0 ? (
                             <div className="border border-dashed border-amber-500/40 rounded-3xl p-16 text-center bg-neutral-900/50 space-y-4">
                                 <p className="text-sm text-neutral-400">No items found in this repository.</p>
-                                <button onClick={addNewItem} className="bg-emerald-600 text-white text-xs px-5 py-2.5 rounded-xl font-semibold">+ Add First Gown</button>
+                                {isAuthenticated && (
+                                    <button onClick={addNewItem} className="bg-emerald-600 text-white text-xs px-5 py-2.5 rounded-xl font-semibold">+ Add First Gown</button>
+                                )}
                             </div>
                         ) : (
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
@@ -290,20 +324,22 @@
                                                 <h4 className="font-serif text-sm font-bold text-amber-100 truncate">{item.name}</h4>
                                                 <p className="text-emerald-400 font-mono text-xs font-semibold mt-1">${item.price.toFixed(2)}</p>
                                             </div>
-                                            <div className="flex gap-2 pt-2 border-t border-neutral-800">
-                                                <button
-                                                    onClick={() => { setEditingItem(item); setEditForm({ id: item.id, name: item.name, price: item.price, imageUrl: item.imageUrl }); }}
-                                                    className="w-1/2 bg-amber-600 hover:bg-amber-500 text-white text-xs py-2 rounded-xl font-semibold transition"
-                                                >
-                                                    ✏️ Edit / Price
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDeleteItem(item.id)}
-                                                    className="w-1/2 bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-700 text-xs py-2 rounded-xl font-bold transition"
-                                                >
-                                                    🗑️ Delete
-                                                </button>
-                                            </div>
+                                            {isAuthenticated && (
+                                                <div className="flex gap-2 pt-2 border-t border-neutral-800">
+                                                    <button
+                                                        onClick={() => { setEditingItem(item); setEditForm({ id: item.id, name: item.name, price: item.price, imageUrl: item.imageUrl }); }}
+                                                        className="w-1/2 bg-amber-600 hover:bg-amber-500 text-white text-xs py-2 rounded-xl font-semibold transition"
+                                                    >
+                                                        ✏️ Edit / Price
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeleteItem(item.id)}
+                                                        className="w-1/2 bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-700 text-xs py-2 rounded-xl font-bold transition"
+                                                    >
+                                                        🗑️ Delete
+                                                    </button>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 ))}
@@ -317,7 +353,7 @@
                             onClick={() => setIsAdminOpen(true)}
                             className="bg-gradient-to-r from-amber-600 via-rose-600 to-amber-600 hover:scale-105 text-white text-xs font-semibold px-4 py-3 rounded-full shadow-2xl border-2 border-amber-300/60 transition flex items-center gap-2 cursor-pointer"
                         >
-                            <span>🔒 Admin Studio</span>
+                            <span>{isAuthenticated ? '🔓 Admin Unlocked' : '🔒 Admin Studio'}</span>
                         </button>
                     </div>
 
@@ -332,7 +368,7 @@
 
                                 {!isAuthenticated ? (
                                     <form onSubmit={handleLogin} className="space-y-4">
-                                        <p className="text-xs text-neutral-400">Enter PIN <strong className="text-amber-300">021910</strong> to manage catalog additions.</p>
+                                        <p className="text-xs text-neutral-400">Enter PIN <strong className="text-amber-300">021910</strong> to unlock add, edit, and delete permissions.</p>
                                         <input
                                             type="password"
                                             maxLength="6"
@@ -350,6 +386,7 @@
                                     <div className="space-y-4 text-center">
                                         <p className="text-xs text-emerald-400 font-mono">Admin Studio Unlocked Successfully ✓</p>
                                         <button onClick={addNewItem} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold py-3 rounded-xl shadow">+ Add New Gown to Repository</button>
+                                        <button onClick={() => { sessionStorage.removeItem('auth_pass'); setIsAuthenticated(false); }} className="w-full bg-neutral-800 text-neutral-300 text-xs py-2.5 rounded-xl">Lock Admin Session</button>
                                     </div>
                                 )}
                             </div>
