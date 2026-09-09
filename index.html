@@ -60,11 +60,11 @@
 
             const [products, setProducts] = React.useState([]);
             const [orders, setOrders] = React.useState([]);
-            const [nextItemNo, setNextItemNo] = React.useState('HCEG-001');
+            const [nextItemNo, setNextItemNo] = React.useState('Item 001');
             const [lastUploadedId, setLastUploadedId] = React.useState('Scanning website...');
             const [missingSlots, setMissingSlots] = React.useState([]);
             
-            const [form, setForm] = React.useState({ id: 'HCEG-001', name: '', price: '' });
+            const [form, setForm] = React.useState({ id: 'Item 001', name: '', price: '' });
             const [primaryImageFile, setPrimaryImageFile] = React.useState(null);
             const [galleryFiles, setGalleryFiles] = React.useState([]);
             
@@ -91,13 +91,25 @@
                     const rName = rParts[1] || '';
                     
                     let items = [];
-                    let prodRes = await fetch(`https://${oName}.github.io/${rName}/data/products.json?t=${Date.now()}`);
-                    if (!prodRes.ok) {
-                        prodRes = await fetch(`https://raw.githubusercontent.com/${repoName}/main/data/products.json?t=${Date.now()}`);
+                    const endpoints = [
+                        `https://${oName}.github.io/${rName}/products.json?t=${Date.now()}`,
+                        `https://${oName}.github.io/${rName}/data/products.json?t=${Date.now()}`,
+                        `https://raw.githubusercontent.com/${repoName}/main/products.json?t=${Date.now()}`,
+                        `https://raw.githubusercontent.com/${repoName}/main/data/products.json?t=${Date.now()}`
+                    ];
+
+                    let rawData = null;
+                    for (const url of endpoints) {
+                        try {
+                            const res = await fetch(url);
+                            if (res.ok) {
+                                rawData = await res.json();
+                                if (rawData) break;
+                            }
+                        } catch (e) {}
                     }
 
-                    if (prodRes.ok) {
-                        const rawData = await prodRes.json();
+                    if (rawData) {
                         if (Array.isArray(rawData)) items = rawData;
                         else if (rawData.products && Array.isArray(rawData.products)) items = rawData.products;
                         else if (rawData.items && Array.isArray(rawData.items)) items = rawData.items;
@@ -109,7 +121,7 @@
                     }
 
                     const normalized = items.map((item, idx) => {
-                        const itemId = item.id || item.itemNo || item.code || `HCEG-${String(idx + 1).padStart(3, '0')}`;
+                        const itemId = item.id || item.itemNo || item.code || `Item ${String(idx + 1).padStart(3, '0')}`;
                         const rawGallery = item.gallery || item.images || item.pictures || [];
                         return {
                             id: itemId,
@@ -125,35 +137,42 @@
                     setProducts(normalized);
                     detectCustomNamingAndAudit(normalized);
 
-                    const ordRes = await fetch(`https://${oName}.github.io/${rName}/data/orders.json?t=${Date.now()}`);
-                    if (ordRes.ok) {
-                        const ordData = await ordRes.json();
-                        setOrders(Array.isArray(ordData) ? ordData : (ordData.orders || []));
-                    } else {
-                        setOrders([]);
+                    const orderEndpoints = [
+                        `https://${oName}.github.io/${rName}/orders.json?t=${Date.now()}`,
+                        `https://${oName}.github.io/${rName}/data/orders.json?t=${Date.now()}`
+                    ];
+                    for (const oUrl of orderEndpoints) {
+                        try {
+                            const oRes = await fetch(oUrl);
+                            if (oRes.ok) {
+                                const ordData = await oRes.json();
+                                setOrders(Array.isArray(ordData) ? ordData : (ordData.orders || []));
+                                break;
+                            }
+                        } catch (e) {}
                     }
                 } catch (err) {
                     setProducts([]);
                     setOrders([]);
                     setLastUploadedId('None');
-                    setNextItemNo('HCEG-001');
+                    setNextItemNo('Item 001');
                     setMissingSlots([]);
-                    setForm(f => ({ ...f, id: 'HCEG-001' }));
+                    setForm(f => ({ ...f, id: 'Item 001' }));
                 }
             };
 
             const detectCustomNamingAndAudit = (itemsArray) => {
                 if (!itemsArray || itemsArray.length === 0) {
                     setLastUploadedId('No items on website yet');
-                    setNextItemNo('HCEG-001');
+                    setNextItemNo('Item 001');
                     setMissingSlots([]);
-                    setForm(f => ({ ...f, id: 'HCEG-001' }));
+                    setForm(f => ({ ...f, id: 'Item 001' }));
                     return;
                 }
 
                 let maxNum = -1;
-                let detectedPrefix = 'HCEG-';
-                let lastFoundStr = 'HCEG-000';
+                let detectedPrefix = 'Item ';
+                let lastFoundStr = 'Item 000';
                 let foundNumbers = [];
 
                 itemsArray.forEach((item) => {
@@ -197,7 +216,7 @@
                         setForm(f => ({ ...f, id: suggestedId }));
                     }
                 } else {
-                    const fallback = `HCEG-0${itemsArray.length + 1}`;
+                    const fallback = `Item 0${itemsArray.length + 1}`;
                     setNextItemNo(fallback);
                     setForm(f => ({ ...f, id: fallback }));
                 }
@@ -289,7 +308,7 @@
                     };
 
                     const updatedProducts = [...products, newItem];
-                    const success = await commitToGitHub('data/products.json', updatedProducts, `Publish item ${cleanId}: ${newItem.name}`);
+                    const success = await commitToGitHub('products.json', updatedProducts, `Publish item ${cleanId}: ${newItem.name}`);
 
                     if (success) {
                         setProducts(updatedProducts);
@@ -321,21 +340,20 @@
                     }
                     return p;
                 });
-                const success = await commitToGitHub('data/products.json', updated, `Update ${fieldName} for item ${targetId}`);
+                const success = await commitToGitHub('products.json', updated, `Update ${fieldName} for item ${targetId}`);
                 if (success) {
                     setProducts(updated);
                     detectCustomNamingAndAudit(updated);
                 }
             };
 
-            // ROBUST DELETION FUNCTION: Removes item from state and syncs GitHub products.json instantly
             const deleteItem = async (targetId) => {
                 if (!confirm(`Are you sure you want to permanently delete item "${targetId}" from website data?`)) return;
                 
                 setLoading(true);
                 try {
                     const updated = products.filter(p => String(p.id || p.itemNo).trim() !== String(targetId).trim());
-                    const success = await commitToGitHub('data/products.json', updated, `Delete website item ${targetId}`);
+                    const success = await commitToGitHub('products.json', updated, `Delete website item ${targetId}`);
                     
                     if (success) {
                         setProducts(updated);
@@ -354,7 +372,7 @@
 
             const updateOrderStatus = async (orderId, newStatus) => {
                 const updated = orders.map(o => o.id === orderId ? { ...o, status: newStatus } : o);
-                const success = await commitToGitHub('data/orders.json', updated, `Update order ${orderId} to ${newStatus}`);
+                const success = await commitToGitHub('orders.json', updated, `Update order ${orderId} to ${newStatus}`);
                 if (success) setOrders(updated);
             };
 
@@ -648,7 +666,7 @@
                                                 const itemId = item.id || item.itemNo || `item-${index}`;
                                                 const galleryCount = item.gallery ? item.gallery.length : 0;
                                                 return (
-                                                    <div key={itemId} className="bg-neutral-900/95 border border-neutral-800 rounded-2xl overflow-hidden shadow-xl flex flex-col justify-between group hover:border-amber-500/60 transition">
+                                                    <div key={itemId} className="bg-neutral-900/95 border border-amber-500/40 rounded-2xl overflow-hidden shadow-2xl flex flex-col justify-between group hover:border-amber-400 transition">
                                                         <div className="h-52 overflow-hidden bg-neutral-950 relative flex items-center justify-center p-3">
                                                             <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover rounded-lg group-hover:scale-105 transition duration-500" />
                                                             <span className="absolute bottom-3 right-3 bg-cyan-950/90 border border-cyan-500/50 text-cyan-300 text-[10px] font-mono px-2 py-0.5 rounded-full font-bold">
@@ -658,45 +676,45 @@
                                                         <div className="p-4 flex flex-col flex-grow justify-between bg-neutral-900 space-y-3">
                                                             <div className="space-y-2">
                                                                 <div>
-                                                                    <label className="block text-[9px] text-neutral-400 uppercase">Edit Item ID / Number</label>
+                                                                    <label className="block text-[9px] text-amber-300 font-semibold uppercase">Edit Item ID / Number</label>
                                                                     <input
                                                                         type="text"
                                                                         defaultValue={item.itemNo || item.id}
                                                                         onBlur={(e) => updateItemField(itemId, 'id', e.target.value)}
-                                                                        className="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1 text-xs text-amber-300 font-mono focus:outline-none focus:border-amber-400"
+                                                                        className="w-full bg-neutral-950 border border-amber-500/50 rounded-lg px-2.5 py-1.5 text-xs text-amber-300 font-mono focus:outline-none focus:border-amber-400"
                                                                         title="Click to edit ID and click away to save"
                                                                     />
                                                                 </div>
                                                                 <div>
-                                                                    <label className="block text-[9px] text-neutral-400 uppercase">Edit Item Name</label>
+                                                                    <label className="block text-[9px] text-amber-300 font-semibold uppercase">Edit Item Name</label>
                                                                     <input
                                                                         type="text"
                                                                         defaultValue={item.name}
                                                                         onBlur={(e) => updateItemField(itemId, 'name', e.target.value)}
-                                                                        className="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1 text-xs text-amber-50 focus:outline-none focus:border-amber-400 font-serif"
+                                                                        className="w-full bg-neutral-950 border border-amber-500/50 rounded-lg px-2.5 py-1.5 text-xs text-amber-50 focus:outline-none focus:border-amber-400 font-serif"
                                                                         title="Click to edit name and click away to save"
                                                                     />
                                                                 </div>
                                                                 <div className="flex items-center gap-2">
                                                                     <div>
-                                                                        <label className="block text-[9px] text-neutral-400 uppercase">Price ($)</label>
+                                                                        <label className="block text-[9px] text-amber-300 font-semibold uppercase">Price ($)</label>
                                                                         <input
                                                                             type="number"
                                                                             step="0.01"
                                                                             defaultValue={item.price}
                                                                             onBlur={(e) => updateItemField(itemId, 'price', e.target.value)}
-                                                                            className="w-24 bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1 text-xs text-emerald-300 font-mono focus:outline-none focus:border-amber-400"
+                                                                            className="w-24 bg-neutral-950 border border-amber-500/50 rounded-lg px-2.5 py-1.5 text-xs text-emerald-300 font-mono focus:outline-none focus:border-amber-400"
                                                                             title="Click to edit price and click away to save"
                                                                         />
                                                                     </div>
                                                                     <span className="text-[10px] text-neutral-500 self-end pb-1">(Auto-saves)</span>
                                                                 </div>
                                                             </div>
-                                                            <div className="pt-2 border-t border-neutral-800 flex gap-2">
+                                                            <div className="pt-3 border-t border-neutral-800 flex gap-2">
                                                                 <button
                                                                     onClick={() => deleteItem(itemId)}
                                                                     disabled={loading}
-                                                                    className="w-full bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-800 text-xs py-2 rounded-xl font-medium transition cursor-pointer shadow"
+                                                                    className="w-full bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-700 text-xs py-2.5 rounded-xl font-bold transition cursor-pointer shadow-lg flex items-center justify-center gap-1.5"
                                                                 >
                                                                     🗑️ Delete from Website
                                                                 </button>
@@ -767,7 +785,7 @@
                                         <tbody className="divide-y divide-neutral-800/50">
                                             {orders.length === 0 ? (
                                                 <tr>
-                                                    <td colSpan="5" className="p-6 text-center text-neutral-500">No orders logged in <code className="bg-neutral-950 px-2 py-1 rounded text-xs">data/orders.json</code> for this repo yet.</td>
+                                                    <td colSpan="5" className="p-6 text-center text-neutral-500">No orders logged in <code className="bg-neutral-950 px-2 py-1 rounded text-xs">orders.json</code> for this repo yet.</td>
                                                 </tr>
                                             ) : (
                                                 orders.map(o => (
