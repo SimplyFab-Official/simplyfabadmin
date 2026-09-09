@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Fab 2.0 | Secure Multi-Repo Admin Studio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .font-serif { font-family: 'Playfair Display', serif; }
+        @keyframes marquee {
+            0% { transform: translateX(100%); }
+            100% { transform: translateX(-100%); }
+        }
+        .animate-marquee {
+            display: inline-block;
+            animation: marquee 30s linear infinite;
+        }
+    </style>
+</head>
+<body class="bg-neutral-950 text-neutral-100 antialiased min-h-full flex flex-col justify-between selection:bg-rose-500 selection:text-white">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        function SecureAdminStudio() {
+            const [isAuthenticated, setIsAuthenticated] = React.useState(sessionStorage.getItem('auth_pass') === '021910');
+            const [passInput, setPassInput] = React.useState('');
+            const [passError, setPassError] = React.useState(false);
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                if (passInput === '021910') {
+                    sessionStorage.setItem('auth_pass', '021910');
+                    setIsAuthenticated(true);
+                } else {
+                    setPassError(true);
+                }
+            };
+
+            const [token, setToken] = React.useState(localStorage.getItem('gh_token') || '');
+            const saveToken = (t) => {
+                setToken(t);
+                localStorage.setItem('gh_token', t);
+            };
+
+            const [selectedRepo, setSelectedRepo] = React.useState('SimplyFab-Official/simple-fab-catalogue');
+            const repositories = [
+                'SimplyFab-Official/simple-fab-catalogue',
+                'SimplyFab-Official/SimplyFab2.0',
+                'SimplyFab-Official/simply-fab-catalog',
+                'SimplyFab-Official/casual-dresses-catalog',
+                'SimplyFab-Official/simply-fab',
+                'SimplyFab-Official/simple-fab-backend',
+                'SimplyFab-Official/desktop-tutorial'
+            ];
+
+            const [products, setProducts] = React.useState([]);
+            const [orders, setOrders] = React.useState([]);
+            const [nextItemNo, setNextItemNo] = React.useState('ITM-001');
+            const [form, setForm] = React.useState({ id: '', name: '', price: '', imagePath: '' });
+            const [imageFile, setImageFile] = React.useState(null);
+            const [loading, setLoading] = React.useState(false);
+            const [activeTab, setActiveTab] = React.useState('store-view');
+            const [searchQuery, setSearchQuery] = React.useState('');
+
+            React.useEffect(() => {
+                if (isAuthenticated && token) {
+                    fetchRepoData(selectedRepo);
+                }
+            }, [selectedRepo, isAuthenticated, token]);
+
+            const fetchRepoData = async (repoName) => {
+                try {
+                    let items = [];
+                    const prodRes = await fetch(`https://raw.githubusercontent.com/${repoName}/main/data/products.json?t=${Date.now()}`);
+                    if (prodRes.ok) {
+                        const rawData = await prodRes.json();
+                        if (Array.isArray(rawData)) items = rawData;
+                        else if (rawData.products && Array.isArray(rawData.products)) items = rawData.products;
+                        else if (rawData.items && Array.isArray(rawData.items)) items = rawData.items;
+                        else if (rawData.catalog && Array.isArray(rawData.catalog)) items = rawData.catalog;
+                    } 
+                    
+                    if (items.length === 0) {
+                        const rootRes = await fetch(`https://raw.githubusercontent.com/${repoName}/main/products.json?t=${Date.now()}`);
+                        if (rootRes.ok) {
+                            const rootData = await rootRes.json();
+                            items = Array.isArray(rootData) ? rootData : (rootData.products || rootData.items || []);
+                        }
+                    }
+
+                    const normalized = items.map((item, idx) => ({
+                        id: item.id || item.itemNo || `ITM-${String(idx + 1).padStart(3, '0')}`,
+                        itemNo: item.itemNo || item.code || item.id || `ITM-${String(idx + 1).padStart(3, '0')}`,
+                        name: item.name || item.title || `Haute Couture Gown ${idx + 1}`,
+                        price: parseFloat(item.price || item.cost || 0),
+                        imageUrl: item.imageUrl || item.imageSrc || item.image || `https://via.placeholder.com/400?text=Item+${idx + 1}`,
+                        published: item.published !== false && item.status !== 'hidden'
+                    }));
+
+                    setProducts(normalized);
+                    calculateNextId(normalized);
+
+                    const ordRes = await fetch(`https://raw.githubusercontent.com/${repoName}/main/data/orders.json?t=${Date.now()}`);
+                    if (ordRes.ok) {
+                        const ordData = await ordRes.json();
+                        setOrders(Array.isArray(ordData) ? ordData : (ordData.orders || []));
+                    } else {
+                        setOrders([]);
+                    }
+                } catch (err) {
+                    console.error("Error fetching repository data:", err);
+                    setProducts([]);
+                    setOrders([]);
+                }
+            };
+
+            const calculateNextId = (items) => {
+                if (!items || items.length === 0) {
+                    setNextItemNo('ITM-001');
+                    setForm(f => ({ ...f, id: 'ITM-001' }));
+                    return;
+                }
+                const lastItem = items[items.length - 1];
+                const lastIdStr = String(lastItem.itemNo || lastItem.id || 'ITM-000');
+                const match = lastIdStr.match(/(\d+)$/);
+                if (match) {
+                    const nextNum = parseInt(match[1], 10) + 1;
+                    const padded = String(nextNum).padStart(3, '0');
+                    const prefix = lastIdStr.replace(/\d+$/, '');
+                    const newId = prefix + padded;
+                    setNextItemNo(newId);
+                    setForm(f => ({ ...f, id: newId }));
+                } else {
+                    const fallbackId = `ITM-0${items.length + 1}`;
+                    setNextItemNo(fallbackId);
+                    setForm(f => ({ ...f, id: fallbackId }));
+                }
+            };
+
+            const commitToGitHub = async (path, contentBytes, message, isBase64 = false) => {
+                if (!token) {
+                    alert('Please enter your GitHub Personal Access Token in the top header.');
+                    return false;
+                }
+                const url = `https://api.github.com/repos/${selectedRepo}/contents/${path}`;
+                let sha = '';
+                const existing = await fetch(url, { headers: { Authorization: `token ${token}` } });
+                if (existing.ok) {
+                    const data = await existing.json();
+                    sha = data.sha;
+                }
+
+                const response = await fetch(url, {
+                    method: 'PUT',
+                    headers: {
+                        Authorization: `token ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        content: isBase64 ? contentBytes : btoa(unescape(encodeURIComponent(JSON.stringify(contentBytes, null, 2)))),
+                        sha: sha || undefined
+                    })
+                });
+                return response.ok;
+            };
+
+            const handleManualPublish = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+
+                try {
+                    let finalImageUrl = form.imagePath || 'https://via.placeholder.com/400';
+                    if (imageFile) {
+                        const reader = new FileReader();
+                        finalImageUrl = await new Promise((resolve, reject) => {
+                            reader.onload = async () => {
+                                const base64 = reader.result.split(',')[1];
+                                const fileName = `images/${form.id}_${Date.now()}_${imageFile.name}`;
+                                const uploaded = await commitToGitHub(fileName, base64, `Upload image for ${form.id}`, true);
+                                if (uploaded) resolve(`https://raw.githubusercontent.com/${selectedRepo}/main/${fileName}`);
+                                else reject('Image upload failed');
+                            };
+                            reader.readAsDataURL(imageFile);
+                        });
+                    }
+
+                    const newItem = {
+                        id: form.id,
+                        itemNo: form.id,
+                        name: form.name,
+                        price: parseFloat(form.price),
+                        imageUrl: finalImageUrl,
+                        published: true
+                    };
+
+                    const updatedProducts = [...products, newItem];
+                    const success = await commitToGitHub('data/products.json', updatedProducts, `Add item ${form.id}: ${form.name}`);
+
+                    if (success) {
+                        setProducts(updatedProducts);
+                        calculateNextId(updatedProducts);
+                        setForm({ id: nextItemNo, name: '', price: '', imagePath: '' });
+                        setImageFile(null);
+                        alert(`Item ${newItem.id} published successfully to ${selectedRepo}!`);
+                    } else {
+                        alert('Failed to publish. Check your GitHub Token permissions.');
+                    }
+                } catch (err) {
+                    alert('Error: ' + err);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const togglePublish = async (targetId) => {
+                const updated = products.map(p => {
+                    const currentId = p.id || p.itemNo;
+                    if (currentId === targetId) {
+                        return { ...p, published: !p.published };
+                    }
+                    return p;
+                });
+                const success = await commitToGitHub('data/products.json', updated, `Toggle publish for item ${targetId}`);
+                if (success) setProducts(updated);
+            };
+
+            const deleteItem = async (targetId) => {
+                if (!confirm(`Are you sure you want to delete item ${targetId}?`)) return;
+                const updated = products.filter(p => (p.id || p.itemNo) !== targetId);
+                const success = await commitToGitHub('data/products.json', updated, `Delete item ${targetId}`);
+                if (success) {
+                    setProducts(updated);
+                    calculateNextId(updated);
+                }
+            };
+
+            const updateOrderStatus = async (orderId, newStatus) => {
+                const updated = orders.map(o => o.id === orderId ? { ...o, status: newStatus } : o);
+                const success = await commitToGitHub('data/orders.json', updated, `Update order ${orderId} to ${newStatus}`);
+                if (success) setOrders(updated);
+            };
+
+            const filteredItems = products.filter(item => {
+                if (!searchQuery) return true;
+                let q = searchQuery.toLowerCase();
+                return (item.name && item.name.toLowerCase().includes(q)) || 
+                       (item.itemNo && item.itemNo.toLowerCase().includes(q)) || 
+                       (item.id && String(item.id).toLowerCase().includes(q));
+            });
+
+            const totalRevenue = orders.filter(o => o.status === 'Closed').reduce((acc, c) => acc + (c.total || 0), 0);
+
+            if (!isAuthenticated) {
+                return (
+                    <div className="flex flex-col items-center justify-center min-h-screen bg-neutral-950 px-4">
+                        <div className="w-full max-w-md bg-neutral-900 border border-amber-500/30 p-8 rounded-3xl shadow-2xl space-y-6 text-center">
+                            <div className="w-14 h-14 mx-auto rounded-full bg-gradient-to-tr from-amber-600 via-rose-500 to-amber-400 flex items-center justify-center text-white font-serif font-bold text-xl shadow-md border-2 border-amber-300/60">SF</div>
+                            <div>
+                                <h1 className="font-serif text-2xl font-bold text-amber-100">Admin Authorization</h1>
+                                <p className="text-xs text-neutral-400 mt-1">Enter PIN code <strong className="text-amber-300">021910</strong> to access.</p>
+                            </div>
+                            <form onSubmit={handleLogin} className="space-y-4">
+                                <input
+                                    type="password"
+                                    maxLength="6"
+                                    placeholder="Enter Admin PIN"
+                                    value={passInput}
+                                    onChange={e => { setPassInput(e.target.value); setPassError(false); }}
+                                    className="w-full bg-neutral-950 border border-amber-500/40 rounded-xl px-4 py-3 text-center text-lg tracking-widest text-amber-300 font-mono focus:outline-none focus:border-amber-400 shadow-inner"
+                                    autoFocus
+                                    required
+                                />
+                                {passError && (
+                                    <p className="text-xs text-rose-400 font-medium">Incorrect PIN code. Please try again.</p>
+                                )}
+                                <button
+                                    type="submit"
+                                    className="w-full bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white font-semibold py-3.5 rounded-xl text-xs uppercase tracking-wider transition shadow-lg border border-amber-400/40"
+                                >
+                                    Unlock Admin Studio
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="flex flex-col min-h-screen bg-neutral-900 text-neutral-100">
+                    <div className="bg-gradient-to-r from-amber-600 via-rose-600 to-amber-600 border-b border-amber-500/30 text-white text-xs py-2 px-4 text-center font-medium tracking-widest uppercase overflow-hidden whitespace-nowrap shadow-sm">
+                        <div className="animate-marquee">
+                            EXQUISITE HANDCRAFTED HAUTE COUTURE &bull; ALL REPOSITORIES ADMIN & SYNC HUB &bull; SECURE ACCESS ENABLED
+                        </div>
+                    </div>
+
+                    <header className="border-b border-neutral-800 bg-neutral-900/95 backdrop-blur-md sticky top-0 z-40 px-6 py-4 flex flex-wrap items-center justify-between gap-4 shadow-xl">
+                        <div className="flex items-center space-x-3">
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-amber-600 via-rose-500 to-amber-400 flex items-center justify-center text-white font-serif font-bold text-sm shadow-md border-2 border-amber-300/60">SF</div>
+                            <div>
+                                <h1 className="font-serif text-lg font-bold tracking-wide text-amber-100">Simple Fab Master Studio</h1>
+                                <select
+                                    value={selectedRepo}
+                                    onChange={(e) => setSelectedRepo(e.target.value)}
+                                    className="bg-neutral-950 border border-amber-500/40 text-[11px] px-2.5 py-1 rounded text-amber-300 font-mono mt-0.5 focus:outline-none"
+                                >
+                                    {repositories.map(r => <option key={r} value={r}>{r}</option>)}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="flex bg-neutral-950 p-1 rounded-xl border border-neutral-800 text-xs font-semibold">
+                            <button onClick={() => setActiveTab('store-view')} className={`px-4 py-2 rounded-lg transition ${activeTab === 'store-view' ? 'bg-amber-600 text-white' : 'text-neutral-400 hover:text-white'}`}>Website View & Publisher ({products.length})</button>
+                            <button onClick={() => setActiveTab('finances')} className={`px-4 py-2 rounded-lg transition ${activeTab === 'finances' ? 'bg-amber-600 text-white' : 'text-neutral-400 hover:text-white'}`}>Financial Tracking ({orders.length})</button>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                            <input
+                                type="password"
+                                placeholder="Paste GitHub Token here"
+                                value={token}
+                                onChange={(e) => saveToken(e.target.value)}
+                                className="bg-neutral-950 border border-neutral-700 text-xs px-3 py-2 rounded-xl text-white w-48 focus:border-amber-400 focus:outline-none"
+                            />
+                            <button
+                                onClick={() => { sessionStorage.removeItem('auth_pass'); setIsAuthenticated(false); }}
+                                className="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs px-3 py-2 rounded-xl transition border border-neutral-700"
+                                title="Lock Admin Studio"
+                            >
+                                Lock
+                            </button>
+                        </div>
+                    </header>
+
+                    <main className="max-w-7xl mx-auto px-4 py-10 flex-grow w-full z-10">
+                        {activeTab === 'store-view' && (
+                            <div className="space-y-10">
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                    <div className="bg-neutral-900/95 p-6 rounded-3xl border border-amber-500/30 shadow-2xl space-y-4">
+                                        <div className="flex justify-between items-center">
+                                            <h2 className="font-serif text-lg font-bold text-amber-100">Add & Publish New Item</h2>
+                                            <span className="text-xs font-mono bg-neutral-950 text-amber-400 px-2.5 py-1 rounded-full border border-amber-500/30">Next: {nextItemNo}</span>
+                                        </div>
+                                        <form onSubmit={handleManualPublish} className="space-y-3">
+                                            <div>
+                                                <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Item Number / ID</label>
+                                                <input
+                                                    type="text"
+                                                    value={form.id}
+                                                    onChange={e => setForm({ ...form, id: e.target.value })}
+                                                    className="w-full bg-neutral-950 border border-amber-500/30 rounded-xl px-3 py-2 text-xs text-amber-200 font-mono"
+                                                    required
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Item Name</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="e.g. Haute Couture Gown"
+                                                    value={form.name}
+                                                    onChange={e => setForm({ ...form, name: e.target.value })}
+                                                    className="w-full bg-neutral-950 border border-amber-500/30 rounded-xl px-3 py-2 text-xs text-neutral-100"
+                                                    required
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Price ($)</label>
+                                                <input
+                                                    type="number"
+                                                    step="0.01"
+                                                    placeholder="0.00"
+                                                    value={form.price}
+                                                    onChange={e => setForm({ ...form, price: e.target.value })}
+                                                    className="w-full bg-neutral-950 border border-amber-500/30 rounded-xl px-3 py-2 text-xs text-neutral-100"
+                                                    required
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-1">Upload Picture</label>
+                                                <input
+                                                    type="file"
+                                                    accept="image/*"
+                                                    onChange={e => setImageFile(e.target.files[0])}
+                                                    className="w-full text-xs text-neutral-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-amber-600 file:text-white cursor-pointer"
+                                                />
+                                            </div>
+                                            <button
+                                                type="submit"
+                                                disabled={loading}
+                                                className="w-full bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white font-semibold py-3 rounded-xl text-xs uppercase tracking-wider transition shadow-lg border border-amber-400/40 disabled:opacity-50"
+                                            >
+                                                {loading ? 'Publishing...' : `Publish Item (${form.id})`}
+                                            </button>
+                                        </form>
+                                    </div>
+
+                                    <div className="lg:col-span-2 relative rounded-3xl overflow-hidden border border-amber-500/30 bg-neutral-900/85 backdrop-blur-xl p-8 flex flex-col justify-between shadow-2xl">
+                                        <div className="absolute inset-0 bg-gradient-to-r from-neutral-950/95 via-neutral-900/85 to-neutral-900/60"></div>
+                                        <div className="relative z-10 space-y-4">
+                                            <span className="text-amber-300 text-xs font-semibold tracking-widest uppercase bg-amber-950/60 px-3.5 py-1.5 rounded-full border border-amber-500/40 inline-block">Masterful Craftsmanship & Bespoke Elegance</span>
+                                            <h2 className="font-serif text-3xl font-bold text-amber-50">Look stunning. Feel beautiful. Be simply fabulous.</h2>
+                                            <p className="text-neutral-300 text-sm font-light italic">"Managing repository: <span className="text-amber-400 font-mono">{selectedRepo}</span>"</p>
+                                        </div>
+                                        <div className="relative z-10 mt-6 bg-neutral-950/90 p-4 rounded-2xl border border-amber-500/40">
+                                            <label className="block text-xs font-semibold text-amber-300 uppercase tracking-wider mb-1">Quick Search / Item ID</label>
+                                            <input
+                                                type="text"
+                                                value={searchQuery}
+                                                onChange={e => setSearchQuery(e.target.value)}
+                                                placeholder="Search items..."
+                                                className="w-full bg-neutral-900 border border-amber-500/30 rounded-xl px-4 py-2.5 text-sm text-neutral-100 focus:outline-none focus:border-amber-400"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div className="flex justify-between items-center border-b border-neutral-800 pb-3">
+                                        <h3 className="font-serif text-xl font-bold text-amber-100">Live Website Catalog View ({filteredItems.length} loaded)</h3>
+                                        <span className="text-xs text-emerald-400 font-mono">● Synced with repository data</span>
+                                    </div>
+
+                                    {filteredItems.length === 0 ? (
+                                        <div className="border border-dashed border-amber-500/40 rounded-3xl p-12 text-center bg-neutral-900/70">
+                                            <h4 className="font-serif text-lg font-medium text-amber-100">No Gowns Found</h4>
+                                            <p className="text-xs text-neutral-400 mt-1">Make sure your repository contains a valid <code className="text-amber-300">data/products.json</code> or use the left panel to add your first item.</p>
+                                        </div>
+                                    ) : (
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                                            {filteredItems.map((item, index) => {
+                                                const itemId = item.id || item.itemNo || `item-${index}`;
+                                                return (
+                                                    <div key={itemId} className="bg-neutral-900/95 border border-neutral-800 rounded-2xl overflow-hidden shadow-xl flex flex-col justify-between group hover:border-amber-500/60 transition">
+                                                        <div className="h-64 overflow-hidden bg-neutral-950 relative flex items-center justify-center p-3">
+                                                            <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover rounded-lg group-hover:scale-105 transition duration-500" />
+                                                            <span className="absolute top-3 left-3 bg-neutral-950/90 border border-amber-500/30 text-amber-300 text-[10px] font-mono px-2.5 py-1 rounded-full font-bold">
+                                                                {item.itemNo || item.id}
+                                                            </span>
+                                                            <span className={`absolute top-3 right-3 text-[10px] px-2.5 py-1 rounded-full font-bold tracking-widest uppercase ${item.published ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-rose-950 text-rose-400 border border-rose-800'}`}>
+                                                                {item.published ? 'Published' : 'Hidden'}
+                                                            </span>
+                                                        </div>
+                                                        <div className="p-4 flex flex-col flex-grow justify-between bg-neutral-900">
+                                                            <div>
+                                                                <h4 className="font-serif font-semibold text-base text-amber-50 truncate">{item.name}</h4>
+                                                                <p className="text-xs text-amber-400 font-semibold mt-1">${(parseFloat(item.price) || 0).toFixed(2)}</p>
+                                                            </div>
+                                                            <div className="mt-4 pt-3 border-t border-neutral-800 flex gap-2">
+                                                                <button
+                                                                    onClick={() => togglePublish(itemId)}
+                                                                    className="flex-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs py-2 rounded-xl font-medium transition"
+                                                                >
+                                                                    {item.published ? 'Unpublish' : 'Publish'}
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => deleteItem(itemId)}
+                                                                    className="bg-rose-950/50 hover:bg-rose-900 text-rose-300 border border-rose-900/50 text-xs px-3 py-2 rounded-xl font-medium transition"
+                                                                >
+                                                                    Delete
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'finances' && (
+                            <div className="max-w-6xl mx-auto space-y-6">
+                                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                                    <div className="bg-neutral-900 p-5 rounded-2xl border border-neutral-800">
+                                        <p className="text-xs text-neutral-400 uppercase tracking-wider">Total Revenue (Closed)</p>
+                                        <p className="text-2xl font-bold text-emerald-400 mt-1">${totalRevenue.toFixed(2)}</p>
+                                    </div>
+                                    <div className="bg-neutral-900 p-5 rounded-2xl border border-neutral-800">
+                                        <p className="text-xs text-neutral-400 uppercase tracking-wider">Pending Orders</p>
+                                        <p className="text-2xl font-bold text-amber-400 mt-1">{orders.filter(o => o.status === 'Pending').length}</p>
+                                    </div>
+                                    <div className="bg-neutral-900 p-5 rounded-2xl border border-neutral-800">
+                                        <p className="text-xs text-neutral-400 uppercase tracking-wider">Processing Orders</p>
+                                        <p className="text-2xl font-bold text-blue-400 mt-1">{orders.filter(o => o.status === 'Processing').length}</p>
+                                    </div>
+                                    <div className="bg-neutral-900 p-5 rounded-2xl border border-neutral-800">
+                                        <p className="text-xs text-neutral-400 uppercase tracking-wider">Open Orders</p>
+                                        <p className="text-2xl font-bold text-purple-400 mt-1">{orders.filter(o => o.status === 'Open').length}</p>
+                                    </div>
+                                </div>
+
+                                <div className="bg-neutral-900 p-6 rounded-3xl border border-neutral-800 space-y-4">
+                                    <h2 className="font-serif text-xl font-bold text-amber-100">Sales & Financial Tracking Ledger</h2>
+                                    <table className="w-full text-left border-collapse text-sm">
+                                        <thead>
+                                            <tr className="border-b border-neutral-800 text-neutral-400 text-xs uppercase tracking-wider">
+                                                <th className="p-3">Order ID</th>
+                                                <th className="p-3">Customer</th>
+                                                <th className="p-3">Total Amount</th>
+                                                <th className="p-3">Status</th>
+                                                <th className="p-3">Manage Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-neutral-800/50">
+                                            {orders.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan="5" className="p-6 text-center text-neutral-500">No orders logged in <code className="bg-neutral-950 px-2 py-1 rounded text-xs">data/orders.json</code> for this repo yet.</td>
+                                                </tr>
+                                            ) : (
+                                                orders.map(o => (
+                                                    <tr key={o.id} className="hover:bg-neutral-800/30">
+                                                        <td className="p-3 font-mono text-amber-300">{o.id}</td>
+                                                        <td className="p-3">{o.customerName || 'Guest'}</td>
+                                                        <td className="p-3 font-semibold text-emerald-300">${(o.total || 0).toFixed(2)}</td>
+                                                        <td className="p-3">
+                                                            <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                                                                o.status === 'Closed' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' :
+                                                                o.status === 'Processing' ? 'bg-blue-950 text-blue-400 border border-blue-800' :
+                                                                o.status === 'Pending' ? 'bg-amber-950 text-amber-400 border border-amber-800' : 'bg-purple-950 text-purple-400 border border-purple-800'
+                                                            }`}>
+                                                                {o.status}
+                                                            </span>
+                                                        </td>
+                                                        <td className="p-3">
+                                                            <select
+                                                                value={o.status}
+                                                                onChange={(e) => updateOrderStatus(o.id, e.target.value)}
+                                                                className="bg-neutral-950 border border-neutral-700 text-xs p-2 rounded-xl text-white focus:border-amber-400 focus:outline-none"
+                                                            >
+                                                                <option value="Open">Open</option>
+                                                                <option value="Pending">Pending</option>
+                                                                <option value="Processing">Processing</option>
+                                                                <option value="Closed">Closed</option>
+                                                            </select>
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+                    </main>
+
+                    <footer className="border-t border-neutral-800 bg-neutral-900/90 py-8 text-center text-xs text-neutral-400 z-10 space-y-1 mt-12">
+                        <p className="font-serif font-semibold text-amber-200 tracking-wide text-sm">Simple Fab 2.0 Central Admin Studio</p>
+                        <p>&copy; 2026 All rights reserved. &bull; Developed by Jeff O.</p>
+                    </footer>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<SecureAdminStudio />, document.getElementById('root'));
+    </script>
+</body>
+</html>
