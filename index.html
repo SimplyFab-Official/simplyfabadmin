@@ -63,7 +63,7 @@
             const [products, setProducts] = React.useState([]);
             const [searchQuery, setSearchQuery] = React.useState('');
             const [loading, setLoading] = React.useState(false);
-            const [statusMsg, setStatusMsg] = React.useState('Loading...');
+            const [statusMsg, setStatusMsg] = React.useState('Connecting...');
             
             const [editingItem, setEditingItem] = React.useState(null);
             const [editForm, setEditForm] = React.useState({ id: '', name: '', price: '', imageUrl: '' });
@@ -73,25 +73,24 @@
             };
 
             React.useEffect(() => {
-                fetchRepoItems(selectedRepo);
+                fetchLiveRepoData(selectedRepo);
             }, [selectedRepo]);
 
-            const fetchRepoItems = async (repo) => {
+            const fetchLiveRepoData = async (repo) => {
                 setLoading(true);
-                setStatusMsg('Fetching from GitHub...');
+                setStatusMsg('Fetching live from GitHub...');
                 try {
                     let items = [];
                     let source = '';
 
-                    // Direct raw file URLs for maximum reliability
-                    const rawUrls = [
-                        `https://raw.githubusercontent.com/${repo}/main/products.json?t=${Date.now()}`,
-                        `https://raw.githubusercontent.com/${repo}/master/products.json?t=${Date.now()}`,
-                        `https://raw.githubusercontent.com/${repo}/main/data/products.json?t=${Date.now()}`,
-                        `https://raw.githubusercontent.com/${repo}/master/data/products.json?t=${Date.now()}`
+                    const endpoints = [
+                        `https://raw.githubusercontent.com/${repo}/main/products.json?cb=${Date.now()}`,
+                        `https://raw.githubusercontent.com/${repo}/master/products.json?cb=${Date.now()}`,
+                        `https://raw.githubusercontent.com/${repo}/main/data/products.json?cb=${Date.now()}`,
+                        `https://raw.githubusercontent.com/${repo}/master/data/products.json?cb=${Date.now()}`
                     ];
 
-                    for (const url of rawUrls) {
+                    for (const url of endpoints) {
                         try {
                             const res = await fetch(url);
                             if (res.ok) {
@@ -112,38 +111,11 @@
                         } catch (e) {}
                     }
 
-                    // Fallback to GitHub Contents API if raw fails
-                    if (items.length === 0) {
-                        try {
-                            const apiRes = await fetch(`https://api.github.com/repos/${repo}/contents/products.json`, {
-                                headers: { Authorization: `token ${token}` }
-                            });
-                            if (apiRes.ok) {
-                                const fileData = await apiRes.json();
-                                if (fileData && fileData.content) {
-                                    const decoded = JSON.parse(atob(fileData.content.replace(/\n/g, '')));
-                                    if (Array.isArray(decoded)) {
-                                        items = decoded;
-                                        source = 'GitHub API (products.json)';
-                                    }
-                                }
-                            }
-                        } catch (e) {}
-                    }
-
-                    if (items.length === 0) {
-                        const cached = localStorage.getItem(`cache_products_${repo}`);
-                        if (cached) {
-                            items = JSON.parse(cached);
-                            source = 'Local Storage Cache';
-                        }
-                    }
-
                     if (items.length === 0) {
                         items = [
                             { id: 'Item 001', name: 'Haute Couture Evening Gown 001', price: 299.99, imageUrl: getSvgPlaceholder('Item 001') }
                         ];
-                        source = 'Default Template';
+                        source = 'Default Template (No products.json found in repo)';
                     }
 
                     const normalized = items.map((item, idx) => {
@@ -163,11 +135,11 @@
                     });
 
                     setProducts(normalized);
-                    setStatusMsg(`Loaded from [${source}] (${normalized.length} items)`);
+                    setStatusMsg(`Live GitHub Data [${source}] (${normalized.length} items)`);
                     localStorage.setItem(`cache_products_${repo}`, JSON.stringify(normalized));
                 } catch (e) {
                     setProducts([]);
-                    setStatusMsg('Error loading repository data');
+                    setStatusMsg('Error fetching live data');
                 } finally {
                     setLoading(false);
                 }
@@ -203,10 +175,9 @@
                 e.preventDefault();
                 const updated = products.map(p => p.id === editingItem.id ? { ...p, id: editForm.id, name: editForm.name, price: parseFloat(editForm.price) || 0, imageUrl: editForm.imageUrl } : p);
                 setProducts(updated);
-                localStorage.setItem(`cache_products_${selectedRepo}`, JSON.stringify(updated));
                 const success = await commitToGitHub(updated);
                 setEditingItem(null);
-                if (success) alert(`Item updated & synced to GitHub successfully!`);
+                if (success) alert(`Item updated & committed straight to GitHub!`);
                 else alert(`Saved locally, but GitHub commit failed. Check token permissions.`);
             };
 
@@ -214,9 +185,8 @@
                 if (!confirm(`Are you sure you want to delete item "${targetId}"?`)) return;
                 const updated = products.filter(p => p.id !== targetId);
                 setProducts(updated);
-                localStorage.setItem(`cache_products_${selectedRepo}`, JSON.stringify(updated));
                 const success = await commitToGitHub(updated);
-                if (success) alert(`Item deleted & synced to GitHub successfully!`);
+                if (success) alert(`Item deleted & committed to GitHub!`);
                 else alert(`Deleted locally, but GitHub sync failed.`);
             };
 
@@ -235,10 +205,9 @@
 
                 const updated = [...products, newItem];
                 setProducts(updated);
-                localStorage.setItem(`cache_products_${selectedRepo}`, JSON.stringify(updated));
                 const success = await commitToGitHub(updated);
-                if (success) alert(`New gown added & synced to GitHub successfully!`);
-                else alert(`Added locally, but GitHub sync failed.`);
+                if (success) alert(`New gown added & committed to GitHub!`);
+                else alert(`Added locally, but GitHub commit failed.`);
             };
 
             const filteredItems = products.filter(item => {
@@ -280,7 +249,7 @@
                                 {isAuthenticated && (
                                     <button onClick={addNewItem} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-4 py-2 rounded-xl font-semibold whitespace-nowrap">+ Add New Gown</button>
                                 )}
-                                <button onClick={() => fetchRepoItems(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2 rounded-xl font-semibold whitespace-nowrap">🔄 Refresh</button>
+                                <button onClick={() => fetchLiveRepoData(selectedRepo)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2 rounded-xl font-semibold whitespace-nowrap">🔄 Refresh</button>
                             </div>
                         </div>
 
