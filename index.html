@@ -143,14 +143,11 @@
                             img = `https://raw.githubusercontent.com/${repo}/main/${img.startsWith('/') ? img.substring(1) : img}`;
                         }
                         
-                        // Support backward compatibility if catalog had USD prices or raw numbers
                         let vndVal = parseFloat(item.priceVnd || item.price || 750000);
-                        // If price looks unusually small (e.g. old USD pricing like 299), convert it to estimated VND base (~58,000 VND per $1 USD baseline or default)
                         if (vndVal < 5000) {
                             vndVal = vndVal * 58000;
                         }
 
-                        // Determine category tag (Default to Gowns or Casual Dress based on name/tags)
                         let cat = item.category;
                         if (!cat) {
                             const lowerName = (item.name || '').toLowerCase();
@@ -420,7 +417,7 @@
 
                                 {!isAuthenticated ? (
                                     <form onSubmit={handleLogin} className="space-y-4">
-                                        <p className="text-xs text-neutral-400">Enter PIN <strong className="text-amber-300">021910</strong> to unlock category tagging, VND pricing, and catalog controls.</p>
+                                        <p className="text-xs text-neutral-400">Enter PIN <strong className="text-amber-300">021910</strong> to unlock category tagging, VND pricing, and automatic admin tab spawning.</p>
                                         <input
                                             type="password"
                                             maxLength="6"
@@ -432,7 +429,19 @@
                                             required
                                         />
                                         {passError && <p className="text-xs text-rose-400 font-medium">Incorrect PIN code.</p>}
-                                        <button type="submit" className="w-full bg-gradient-to-r from-amber-600 to-rose-600 text-white font-semibold py-3.5 rounded-xl text-xs uppercase tracking-wider">Unlock Controls</button>
+                                        <button 
+                                            type="submit" 
+                                            onClick={() => {
+                                                if (passInput === '021910') {
+                                                    // Automatically open a new browser tab/window with auth pre-set
+                                                    localStorage.setItem('sf_auto_admin', 'true');
+                                                    window.open(window.location.href, '_blank');
+                                                }
+                                            }}
+                                            className="w-full bg-gradient-to-r from-amber-600 to-rose-600 text-white font-semibold py-3.5 rounded-xl text-xs uppercase tracking-wider"
+                                        >
+                                            Unlock Controls & Open Admin Tab
+                                        </button>
                                     </form>
                                 ) : (
                                     <div className="space-y-4 text-center">
@@ -447,7 +456,16 @@
                                         >
                                             + Add New Item
                                         </button>
-                                        <button onClick={() => { sessionStorage.removeItem('auth_pass'); setIsAuthenticated(false); }} className="w-full bg-neutral-800 text-neutral-300 text-xs py-2.5 rounded-xl">Lock Admin Session</button>
+                                        <button 
+                                            onClick={() => {
+                                                localStorage.setItem('sf_auto_admin', 'true');
+                                                window.open(window.location.href, '_blank');
+                                            }}
+                                            className="w-full bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold py-2.5 rounded-xl shadow"
+                                        >
+                                            📑 Open Dedicated Admin Tab
+                                        </button>
+                                        <button onClick={() => { sessionStorage.removeItem('auth_pass'); localStorage.removeItem('sf_auto_admin'); setIsAuthenticated(false); }} className="w-full bg-neutral-800 text-neutral-300 text-xs py-2.5 rounded-xl">Lock Admin Session</button>
                                     </div>
                                 )}
                             </div>
@@ -566,7 +584,7 @@
                                             type="number"
                                             step="1000"
                                             value={editForm.priceVnd}
-                                            onChange={e => setEditForm({ ...editForm, editForm, priceVnd: e.target.value })}
+                                            onChange={e => setEditForm({ ...editForm, priceVnd: e.target.value })}
                                             className="w-full bg-neutral-950 border border-neutral-700 rounded-xl px-3 py-2 text-xs text-emerald-300 font-mono"
                                             required
                                         />
@@ -592,6 +610,11 @@
                     )}
                 </div>
             );
+        }
+
+        // Auto-unlock new tabs if spawned from admin session
+        if (localStorage.getItem('sf_auto_admin') === 'true') {
+            sessionStorage.setItem('auth_pass', '021910');
         }
 
         ReactDOM.render(<SimpleFabApp />, document.getElementById('root'));
